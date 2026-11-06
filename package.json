@@ -1,0 +1,32 @@
+{
+  "name": "ai-video-studio",
+  "version": "1.0.0",
+  "description": "AI VIDEO STUDIO - منصة احترافية لإنشاء الفيديوهات بالذكاء الاصطناعي، وتحويل النصوص والصور إلى فيديوهات، وإنشاء الكرتون والتعليق الصوتي، مع نظام اشتراكات وحساب مالك مجاني.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmed6655address-afk/ai-video-studio.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ahmed6655address-afk/ai-video-studio/issues"
+  },
+  "homepage": "https://github.com/ahmed6655address-afk/ai-video-studio#readme",
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.22.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.6"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "vite": "^6.4.5"
+  }
+}
