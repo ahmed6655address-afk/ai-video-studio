@@ -44,6 +44,13 @@ export function authRouter(db) {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+
+    // The owner identity is provisioned from server env only. Public registration
+    // must never create it, claim it, or learn which address it is.
+    if (isOwnerEmail(normalizedEmail)) {
+      return res.status(409).json({ error: 'EMAIL_TAKEN', messageAr: 'هذا البريد الإلكتروني مستخدم بالفعل.' });
+    }
+
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
     if (existing) {
       return res.status(409).json({ error: 'EMAIL_TAKEN', messageAr: 'هذا البريد الإلكتروني مستخدم بالفعل.' });
