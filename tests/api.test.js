@@ -317,6 +317,7 @@ test('owner has free unlimited access and full admin rights', async (t) => {
     });
   });
 
+  await t.test('admin overview aggregates platform stats', async () => {
     const res = await api('/api/admin/overview', { cookie: state.ownerCookie });
     assert.equal(res.status, 200);
     assert.ok(res.body.stats.users >= 2);
