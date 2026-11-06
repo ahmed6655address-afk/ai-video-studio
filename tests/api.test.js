@@ -276,7 +276,47 @@ test('owner has free unlimited access and full admin rights', async (t) => {
     assert.match(res.body.messageAr, /غير متصلة|لم يتم توليد/);
   });
 
-  await t.test('admin overview aggregates platform stats', async () => {
+  await t.test('admin API cannot grant the owner role or promote oneself', async () => {
+    const users = await api('/api/admin/users', { cookie: state.ownerCookie });
+    const regular = users.body.users.find((user) => user.email === 'sara@test.dev');
+    assert.ok(regular);
+
+    const toOwner = await api(`/api/admin/users/${regular.id}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { role: 'owner' },
+    });
+    assert.equal(toOwner.status, 400);
+    assert.equal(toOwner.body.error, 'INVALID_ROLE');
+
+    const stillUser = await api('/api/auth/me', { cookie: state.userCookie });
+    assert.equal(stillUser.body.user.role, 'user');
+
+    // Even a legitimately granted admin cannot promote themselves to owner.
+    const makeAdmin = await api(`/api/admin/users/${regular.id}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { role: 'admin' },
+    });
+    assert.equal(makeAdmin.status, 200);
+    assert.equal(makeAdmin.body.user.role, 'admin');
+
+    const selfPromote = await api(`/api/admin/users/${regular.id}`, {
+      method: 'PATCH',
+      cookie: state.userCookie,
+      body: { role: 'owner' },
+    });
+    assert.equal(selfPromote.status, 400);
+    assert.equal(selfPromote.body.error, 'SELF_EDIT');
+
+    // Restore the regular role so later assertions describe an ordinary user.
+    await api(`/api/admin/users/${regular.id}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { role: 'user' },
+    });
+  });
+
     const res = await api('/api/admin/overview', { cookie: state.ownerCookie });
     assert.equal(res.status, 200);
     assert.ok(res.body.stats.users >= 2);
