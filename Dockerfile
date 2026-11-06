@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build stage: compile the React SPA and native SQLite bindings ----
-FROM node:22.23.4-bookworm-slim AS build
+FROM node:22.23.4-trixie-slim AS build
 WORKDIR /app
 
 # better-sqlite3 falls back to a source build when no prebuilt binary matches.
@@ -19,7 +19,7 @@ COPY server ./server
 RUN npm run build && npm prune --omit=dev
 
 # ---- runtime stage ----
-FROM node:22.23.4-bookworm-slim AS runtime
+FROM node:22.23.4-trixie-slim AS runtime
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
