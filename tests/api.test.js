@@ -27,7 +27,7 @@ const { createApp } = await import('../server/index.js');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'avs-test-'));
 const dbFile = path.join(tmpDir, 'test.db');
 const app = createApp({ dbFile });
-const server = app.listen(0, '127.0.0.1');
+const server = app.listen(0);
 await new Promise((resolve) => server.once('listening', resolve));
 const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
