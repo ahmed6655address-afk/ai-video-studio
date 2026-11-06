@@ -101,6 +101,9 @@ export default function App() {
               </Protected>
             }
           />
+          {/* Canonical short links: /dashboard and /admin are what people type. */}
+          <Route path="/dashboard" element={<Navigate to="/app" replace />} />
+          <Route path="/admin" element={<Navigate to="/app/admin" replace />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </ToastProvider>
