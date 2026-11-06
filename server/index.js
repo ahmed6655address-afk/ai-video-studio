@@ -42,8 +42,11 @@ function securityHeaders(req, res, next) {
  */
 function csrfGuard(req, res, next) {
   if (!MUTATING.has(req.method)) return next();
+  // Requests without a body (e.g. DELETE /api/.../subscription) still need the
+  // custom header, but there is nothing to validate as JSON.
+  const hasBody = Number(req.headers['content-length'] || 0) > 0 || Boolean(req.headers['transfer-encoding']);
   const contentType = String(req.headers['content-type'] || '');
-  if (!contentType.includes('application/json')) {
+  if (hasBody && !contentType.includes('application/json')) {
     return res.status(415).json({ error: 'UNSUPPORTED_MEDIA_TYPE', messageAr: 'يجب إرسال الطلب بصيغة JSON.' });
   }
   if (req.get('x-requested-with') !== 'ai-video-studio') {
