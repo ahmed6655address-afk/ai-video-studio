@@ -116,9 +116,6 @@ export function projectsRouter(db) {
           db.prepare(
             "UPDATE projects SET status = 'queued', provider = ?, provider_job_id = ?, updated_at = ? WHERE id = ?"
           ).run(def.providerLabel, result.jobId, new Date().toISOString(), projectId);
-          db.prepare(
-            "INSERT INTO usage_events (user_id, tool, project_id, kind, created_at) VALUES (?, ?, ?, 'generation', ?)"
-          ).run(req.user.id, tool, projectId, new Date().toISOString());
           status = 'queued';
           message = 'تم إرسال الطلب إلى المزوّد.';
         } catch (err) {
