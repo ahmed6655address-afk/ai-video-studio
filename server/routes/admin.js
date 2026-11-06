@@ -207,7 +207,7 @@ export function adminRouter(db) {
     const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(target.id);
     res.status(201).json({
       user: publicUser(updated),
-      subscription: activeSubscription(db, target.id),
+      subscription: serializeSubscription(activeSubscription(db, target.id)),
       entitlements: getEntitlements(db, updated),
       messageAr: `تم تفعيل خطة «${plan.name_ar}» لمدة ${durationMonths} شهر.`,
     });
