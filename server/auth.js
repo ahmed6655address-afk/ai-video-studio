@@ -115,16 +115,43 @@ export function ownerEmailFromEnv() {
  * Provisions the single secure owner account from environment variables.
  * The owner is the only account that always has unlimited, free access.
  */
+/** True when the address is the configured owner identity (server-side only). */
+export function isOwnerEmail(email) {
+  if (!email) return false;
+  return String(email).trim().toLowerCase() === ownerEmailFromEnv();
+}
+
 export function ensureOwner(db, { log = () => {} } = {}) {
   const email = ownerEmailFromEnv();
   const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
 
   if (existing) {
-    if (existing.role !== 'owner') {
-      db.prepare("UPDATE users SET role = 'owner', status = 'active' WHERE id = ?").run(existing.id);
-      log(`[owner] elevated ${email} to owner`);
+    if (existing.role === 'owner') {
+      return { id: existing.id, email, created: false, password: null };
     }
-    return { id: existing.id, email, created: false, password: null };
+
+    // An account already holds this address (registered before OWNER_EMAIL pointed
+    // here, or by someone else entirely). Elevating it must never preserve the
+    // password that account's owner chose for themselves, otherwise public
+    // registration would be a privilege-escalation path into the owner role.
+    const configured = process.env.OWNER_PASSWORD;
+    const generated = !configured || configured.length < 10;
+    const secret = generated ? crypto.randomBytes(18).toString('base64url') : configured;
+
+    db.prepare(
+      `UPDATE users
+          SET role = 'owner', status = 'active', password_hash = ?,
+              must_change_password = ?, custom_limits = NULL
+        WHERE id = ?`
+    ).run(hashPassword(secret), generated ? 1 : 0, existing.id);
+    // Revoke every session the previous holder of the address may still have.
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id);
+
+    log(`[owner] elevated existing account ${email} to owner — password reset from OWNER_PASSWORD, sessions revoked`);
+    if (generated) {
+      log('[owner] OWNER_PASSWORD was not provided — a random password was generated.');
+    }
+    return { id: existing.id, email, created: false, password: generated ? secret : null };
   }
 
   let password = process.env.OWNER_PASSWORD;
