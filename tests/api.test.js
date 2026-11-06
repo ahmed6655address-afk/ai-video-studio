@@ -152,6 +152,34 @@ test('registration, login and session handling', async (t) => {
     assert.ok(res.body.fields.password);
   });
 
+  await t.test('public registration cannot claim the owner address', async () => {
+    const res = await api('/api/auth/register', {
+      method: 'POST',
+      body: { name: 'محتال', email: 'OWNER@aivideo.studio', password: 'Str0ngPass!23' },
+    });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error, 'EMAIL_TAKEN');
+    assert.equal(res.cookie, '', 'no session may be issued for the owner address');
+
+    // The real owner is untouched and still owns the account.
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+    });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.user.role, 'owner');
+  });
+
+  await t.test('registration ignores any role supplied by the client', async () => {
+    const res = await api('/api/auth/register', {
+      method: 'POST',
+      body: { name: 'طامع', email: 'climber@test.dev', password: 'Str0ngPass!23', role: 'owner', isOwner: true },
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.user.role, 'user');
+    assert.equal(res.body.entitlements.unlimited, false);
+  });
+
   await t.test('session cookie authenticates /api/auth/me', async () => {
     const res = await api('/api/auth/me', { cookie: state.userCookie });
     assert.equal(res.status, 200);
