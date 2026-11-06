@@ -132,7 +132,7 @@ export function authRouter(db) {
     );
     // Invalidate every other session after a password change.
     const cookies = parseCookies(req.headers.cookie);
-    const currentHash = require('node:crypto')
+    const currentHash = crypto
       .createHash('sha256')
       .update(cookies[SESSION_COOKIE] || '')
       .digest('hex');
