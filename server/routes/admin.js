@@ -115,9 +115,7 @@ export function adminRouter(db) {
       const sub = activeSubscription(db, user.id);
       return {
         ...publicUser(user),
-        subscription: sub
-          ? { id: sub.id, planCode: sub.plan_code, planNameAr: sub.name_ar, expiresAt: sub.expires_at, status: sub.status }
-          : null,
+        subscription: serializeSubscription(sub),
         usage: monthlyUsage(db, user.id),
         projects: db.prepare('SELECT COUNT(*) AS c FROM projects WHERE user_id = ?').get(user.id).c,
         entitlements: getEntitlements(db, user),
