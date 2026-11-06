@@ -1940,3 +1940,44 @@ tbody tr:hover {
 @media (min-width: 1024px) {
   .plans-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* ============================================================
+   Avatar colour picker (profile)
+   ============================================================ */
+
+.color-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.color-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.color-dot:hover {
+  transform: translateY(-2px);
+}
+
+.color-dot.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.color-dot.active::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
