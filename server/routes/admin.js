@@ -26,6 +26,17 @@ function serializePlan(row) {
   };
 }
 
+function serializeSubscription(sub) {
+  if (!sub) return null;
+  return {
+    id: sub.id,
+    planCode: sub.plan_code,
+    planNameAr: sub.name_ar,
+    expiresAt: sub.expires_at,
+    status: sub.status,
+  };
+}
+
 export function publicPlansRouter(db) {
   const router = express.Router();
   router.get('/plans', (req, res) => {
