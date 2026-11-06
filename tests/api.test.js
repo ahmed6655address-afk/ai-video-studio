@@ -480,3 +480,66 @@ test('granting a subscription unlocks generation within plan limits', async (t) 
     assert.equal(me.status, 401);
   });
 });
+
+test('owner identity comes from server env, never from a registrant password', async (t) => {
+  await t.test('re-provisioning an already registered address resets its password and sessions', async () => {
+    const previousEmail = process.env.OWNER_EMAIL;
+    const previousPassword = process.env.OWNER_PASSWORD;
+    process.env.OWNER_EMAIL = 'Sara@Test.dev';
+    process.env.OWNER_PASSWORD = 'Rotated-Owner-Pass!2026';
+
+    // Boot a second instance over the same database: this simulates pointing
+    // OWNER_EMAIL at an address that a regular user registered earlier.
+    const app2 = createApp({ dbFile });
+    const server2 = app2.listen(0);
+    await new Promise((resolve) => server2.once('listening', resolve));
+    const base2 = `http://127.0.0.1:${server2.address().port}`;
+    const call2 = async (pathname, { method = 'GET', body } = {}) => {
+      const headers = {};
+      if (body !== undefined) headers['content-type'] = 'application/json';
+      if (method !== 'GET') headers['x-requested-with'] = 'ai-video-studio';
+      const res = await fetch(`${base2}${pathname}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json().catch(() => null) };
+    };
+
+    try {
+      // The password the registrant chose for themselves no longer opens the account.
+      const oldPassword = await call2('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'sara@test.dev', password: 'Str0ngPass!23' },
+      });
+      assert.equal(oldPassword.status, 401);
+      assert.equal(oldPassword.body.error, 'INVALID_CREDENTIALS');
+
+      // Only the env secret does, and it carries owner rights plus unlimited access.
+      const envPassword = await call2('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'sara@test.dev', password: 'Rotated-Owner-Pass!2026' },
+      });
+      assert.equal(envPassword.status, 200);
+      assert.equal(envPassword.body.user.role, 'owner');
+      assert.equal(envPassword.body.entitlements.unlimited, true);
+      assert.equal(envPassword.body.entitlements.hasAccess, true);
+
+      // Any session held before elevation is revoked.
+      const stale = await api('/api/dashboard', { cookie: state.userCookie });
+      assert.equal(stale.status, 401);
+
+      // The address still cannot be claimed through public registration.
+      const reclaim = await call2('/api/auth/register', {
+        method: 'POST',
+        body: { name: 'مزاحم', email: 'sara@test.dev', password: 'Str0ngPass!23' },
+      });
+      assert.equal(reclaim.status, 409);
+      assert.equal(reclaim.body.error, 'EMAIL_TAKEN');
+    } finally {
+      server2.close();
+      process.env.OWNER_EMAIL = previousEmail;
+      process.env.OWNER_PASSWORD = previousPassword;
+    }
+  });
+});
