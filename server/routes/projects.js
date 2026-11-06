@@ -99,6 +99,13 @@ export function projectsRouter(db) {
         );
 
       const projectId = info.lastInsertRowid;
+      // The quota is consumed by the accepted request itself, not by a successful
+      // provider callback — otherwise limits could never be enforced while no
+      // provider is connected.
+      db.prepare(
+        "INSERT INTO usage_events (user_id, tool, project_id, kind, created_at) VALUES (?, ?, ?, 'generation', ?)"
+      ).run(req.user.id, tool, projectId, now);
+
       const adapter = createAdapter(tool);
       let status = 'pending_provider';
       let message = 'تم حفظ الطلب. هذه الأداة غير متصلة بمزوّد ذكاء اصطناعي بعد، لذلك لم يتم توليد فيديو.';
