@@ -81,11 +81,11 @@ export default function ToolPage() {
   const canGenerate = Boolean(ent?.canGenerate);
   const used = Number(ent?.usage?.[toolId] ?? 0);
   const limit = Number(ent?.limits?.[toolId] ?? 0);
-  const remaining = ent?.isOwner ? null : Math.max(limit - used, 0);
+  const remaining = ent?.isUnlimited ? null : Math.max(limit - used, 0);
 
   const accessNote = useMemo(() => {
     if (!ent) return '';
-    if (ent.isOwner) return 'حساب المالك: وصول غير محدود لكل الأدوات.';
+    if (ent.isStaff) return ent.isOwner ? 'حساب المالك: وصول غير محدود لكل الأدوات.' : 'حساب إداري: وصول غير محدود لكل الأدوات.';
     if (!ent.hasActiveSubscription) return 'التوليد متاح لأصحاب الاشتراك النشط فقط.';
     if (!ent.isOwner && remaining === 0) return 'استهلكت حدك الشهري لهذه الأداة.';
     return `متبقٍ لك ${formatNumber(remaining)} عملية في هذه الأداة هذا الشهر.`;
@@ -253,11 +253,11 @@ export default function ToolPage() {
 
           <div className="row-between" style={{ marginTop: 8, gap: 12, flexWrap: 'wrap' }}>
             <div className="small muted">
-              {ent?.isOwner
+              {ent?.isUnlimited
                 ? 'غير محدود'
                 : `الاستخدام: ${formatNumber(used)} / ${formatNumber(limit)}`}
               <div style={{ width: 160, marginTop: 6 }}>
-                <Progress value={used} max={ent?.isOwner ? Math.max(used, 1) : limit || 1} tone={tool.accent} />
+                <Progress value={used} max={ent?.isUnlimited ? Math.max(used, 1) : limit || 1} tone={tool.accent} />
               </div>
             </div>
             <button className="btn btn-primary" type="submit" disabled={submitting || !canGenerate}>
