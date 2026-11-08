@@ -12,7 +12,7 @@ import {
   useToast,
 } from '../components/ui.jsx';
 import { auth, studio } from '../api.js';
-import { useSession } from '../session.jsx';
+import { normalizeEntitlements, useSession } from '../session.jsx';
 
 const COLORS = ['violet', 'cyan', 'amber', 'rose', 'emerald', 'gold'];
 
@@ -48,7 +48,7 @@ export default function Profile() {
       .finally(() => setLoadingUsage(false));
   }, []);
 
-  const ent = usage || entitlements;
+  const ent = normalizeEntitlements(usage || entitlements, user);
   const accent = accentOf(avatarColor);
 
   async function saveProfile(event) {
@@ -170,10 +170,10 @@ export default function Profile() {
           </div>
 
           <div className={`access-pill ${ent?.canGenerate ? 'on' : 'off'}`}>
-            <Icon name={ent?.isOwner ? 'crown' : ent?.hasActiveSubscription ? 'check' : 'lock'} size={16} />
+            <Icon name={ent?.isOwner ? 'crown' : ent?.isStaff ? 'shield-check' : ent?.hasActiveSubscription ? 'check' : 'lock'} size={16} />
             <span>
-              {ent?.isOwner
-                ? 'وصول غير محدود (حساب المالك)'
+              {ent?.isStaff
+                ? ent.isOwner ? 'وصول غير محدود (حساب المالك)' : 'وصول غير محدود (حساب إداري)'
                 : ent?.hasActiveSubscription
                   ? `خطة ${ent.planNameAr || ent.planCode} نشطة`
                   : 'لا يوجد اشتراك نشط'}
@@ -181,7 +181,7 @@ export default function Profile() {
           </div>
 
           <dl className="meta-list" style={{ marginTop: 12 }}>
-            <div><dt>الحالة</dt><dd>{ent?.hasActiveSubscription ? 'نشط' : 'غير نشط'}</dd></div>
+            <div><dt>الحالة</dt><dd>{ent?.isStaff ? 'غير محدود' : ent?.hasActiveSubscription ? 'نشط' : 'غير نشط'}</dd></div>
             {ent?.subscriptionEndsAt && (
               <div><dt>ينتهي في</dt><dd>{formatDate(ent.subscriptionEndsAt)}</dd></div>
             )}
@@ -198,17 +198,17 @@ export default function Profile() {
                   <div className="row-between small">
                     <span>{ent.toolNames?.[tool] || tool}</span>
                     <span className="muted">
-                      {ent.isOwner ? `${formatNumber(used)} · غير محدود` : `${formatNumber(used)} / ${formatNumber(limit)}`}
+                      {ent.isUnlimited ? `${formatNumber(used)} · غير محدود` : `${formatNumber(used)} / ${formatNumber(limit)}`}
                     </span>
                   </div>
-                  <Progress value={used} max={ent.isOwner ? Math.max(used, 1) : limit || 1} />
+                  <Progress value={used} max={ent.isUnlimited ? Math.max(used, 1) : limit || 1} />
                 </div>
               );
             })}
             {!ent?.limits && !loadingUsage && <p className="small faint">لا توجد بيانات استخدام.</p>}
           </div>
 
-          {!ent?.isOwner && (
+          {!ent?.isStaff && (
             <>
               <hr className="divider" />
               <h3 style={{ fontSize: '0.95rem' }}>ترقية الخطة</h3>
