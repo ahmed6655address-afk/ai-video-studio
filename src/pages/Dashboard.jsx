@@ -13,7 +13,7 @@ import {
   timeAgo,
 } from '../components/ui.jsx';
 import { studio } from '../api.js';
-import { useSession } from '../session.jsx';
+import { normalizeEntitlements, useSession } from '../session.jsx';
 
 export default function Dashboard() {
   const { user, entitlements, tools } = useSession();
@@ -39,7 +39,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  const ent = data?.entitlements || entitlements || null;
+  const ent = normalizeEntitlements(data?.entitlements, user) || entitlements || null;
   const toolList = (data?.tools?.length ? data.tools : tools) || [];
 
   const monthlyUsed = useMemo(() => {
@@ -87,15 +87,15 @@ export default function Dashboard() {
             </span>
             <div>
               <h3 style={{ margin: 0 }}>
-                {ent?.isOwner
-                  ? 'حساب المالك — وصول غير محدود'
+                {ent?.isStaff
+                  ? ent.isOwner ? 'حساب المالك — وصول غير محدود' : 'حساب إداري — وصول غير محدود'
                   : ent?.hasActiveSubscription
                     ? `الخطة الحالية: ${ent.planNameAr || ent.planCode}`
                     : 'لا يوجد اشتراك نشط'}
               </h3>
               <p className="muted small" style={{ margin: '4px 0 0' }}>
-                {ent?.isOwner
-                  ? 'كل الأدوات متاحة لك مجانًا وبدون حدود شهرية.'
+                {ent?.isStaff
+                  ? 'كل الأدوات متاحة لك بصلاحيات إدارية وبدون حدود شهرية.'
                   : ent?.hasActiveSubscription
                     ? `ينتهي الاشتراك في ${ent.subscriptionEndsAt ? new Date(ent.subscriptionEndsAt).toLocaleDateString('ar-EG-u-nu-latn') : '—'}`
                     : 'اشتراكك غير نشط حاليًا. تواصل مع الإدارة لتفعيل خطة مدفوعة.'}
@@ -125,7 +125,7 @@ export default function Dashboard() {
         <Stat
           label="استخدام هذا الشهر"
           value={formatNumber(monthlyUsed)}
-          hint={ent?.isOwner ? 'غير محدود' : totalQuota ? `من ${formatNumber(totalQuota)}` : '—'}
+          hint={ent?.isUnlimited ? 'غير محدود' : totalQuota ? `من ${formatNumber(totalQuota)}` : '—'}
           icon="chart"
           tone="cyan"
         />
@@ -161,9 +161,9 @@ export default function Dashboard() {
                 <div style={{ marginTop: 14 }}>
                   <div className="row-between small muted" style={{ marginBottom: 6 }}>
                     <span>الاستخدام الشهري</span>
-                    <span>{ent?.isOwner ? `${formatNumber(used)} · غير محدود` : `${formatNumber(used)} / ${formatNumber(limit)}`}</span>
+                    <span>{ent?.isUnlimited ? `${formatNumber(used)} · غير محدود` : `${formatNumber(used)} / ${formatNumber(limit)}`}</span>
                   </div>
-                  <Progress value={used} max={ent?.isOwner ? Math.max(used, 1) : limit || 1} tone={tool.accent} />
+                  <Progress value={used} max={ent?.isUnlimited ? Math.max(used, 1) : limit || 1} tone={tool.accent} />
                 </div>
 
                 <div className="row-between" style={{ marginTop: 14, gap: 10, flexWrap: 'wrap' }}>
