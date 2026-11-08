@@ -1,6 +1,6 @@
-// Dev utility: lists CSS class names used by JSX files but not defined in src/styles.css.
+ Dev utility: lists CSS class names used /by JSX files but not defined in src/styles.css.
 // Usage: node scripts/check-classes.js
-import fs from 'node:fs';
+import fs from '/node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
