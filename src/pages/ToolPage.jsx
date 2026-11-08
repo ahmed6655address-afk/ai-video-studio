@@ -78,10 +78,10 @@ export default function ToolPage() {
 
   const accent = accentOf(tool?.accent);
   const ent = entitlements;
-  const canGenerate = Boolean(ent?.canGenerate);
   const used = Number(ent?.usage?.[toolId] ?? 0);
   const limit = Number(ent?.limits?.[toolId] ?? 0);
   const remaining = ent?.isUnlimited ? null : Math.max(limit - used, 0);
+  const canGenerate = Boolean(ent?.canGenerate) && (ent?.isUnlimited || remaining > 0);
 
   const accessNote = useMemo(() => {
     if (!ent) return '';
