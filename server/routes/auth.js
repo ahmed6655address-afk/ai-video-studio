@@ -95,7 +95,10 @@ export function authRouter(db) {
       ? db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail)
       : null;
 
-    if (!user || !verifyPassword(user.password_hash, password || '')) {
+    // Exactly one scrypt verification runs on every attempt — including when the
+    // address has no account — so response time no longer reveals registration.
+    const passwordOk = verifyPassword(user ? user.password_hash : DUMMY_PASSWORD_HASH, password || '');
+    if (!user || !passwordOk) {
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', messageAr: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' });
     }
     if (user.status !== 'active') {
@@ -136,6 +139,19 @@ export function authRouter(db) {
 
   router.post('/me/password', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+    // Bounded per authenticated account and client IP, so a stolen session cannot
+    // grind the current password while other users stay unaffected.
+    const attempt = rateLimit({
+      key: `pwchange:${req.user.id}:${req.ip || 'unknown'}`,
+      limit: 5,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (!attempt.allowed) {
+      return res.status(429).json({
+        error: 'TOO_MANY_ATTEMPTS',
+        messageAr: 'محاولات كثيرة لتغيير كلمة المرور. حاول مرة أخرى بعد قليل.',
+      });
+    }
     const { currentPassword, newPassword } = req.body || {};
     if (!verifyPassword(req.user.password_hash, currentPassword || '')) {
       return res.status(400).json({ error: 'INVALID_PASSWORD', fields: { currentPassword: 'كلمة المرور الحالية غير صحيحة' } });
