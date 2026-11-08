@@ -3,6 +3,21 @@ import { auth, studio } from './api.js';
 
 const EMPTY = { loading: true, user: null, entitlements: null, tools: [], providers: null };
 
+export function normalizeEntitlements(entitlements, user) {
+  if (!entitlements) return null;
+  return {
+    ...entitlements,
+    canGenerate: Boolean(entitlements.hasAccess),
+    isOwner: user?.role === 'owner',
+    isStaff: Boolean(entitlements.isStaff),
+    isUnlimited: Boolean(entitlements.unlimited),
+    hasActiveSubscription: Boolean(entitlements.subscription),
+    planNameAr: entitlements.plan?.nameAr ?? null,
+    planCode: entitlements.plan?.code ?? entitlements.subscription?.planCode ?? null,
+    subscriptionEndsAt: entitlements.subscription?.expiresAt ?? null,
+  };
+}
+
 const SessionContext = createContext(null);
 
 export function SessionProvider({ children }) {
@@ -13,7 +28,7 @@ export function SessionProvider({ children }) {
     setState({
       loading: false,
       user: data?.user ?? null,
-      entitlements: data?.entitlements ?? null,
+      entitlements: normalizeEntitlements(data?.entitlements, data?.user),
       tools: data?.tools ?? [],
       providers: data?.providers ?? null,
     });
@@ -69,7 +84,7 @@ export function SessionProvider({ children }) {
   }, []);
 
   const setEntitlements = useCallback((entitlements) => {
-    setState((prev) => (entitlements ? { ...prev, entitlements } : prev));
+    setState((prev) => (entitlements ? { ...prev, entitlements: normalizeEntitlements(entitlements, prev.user) } : prev));
   }, []);
 
   const value = useMemo(
