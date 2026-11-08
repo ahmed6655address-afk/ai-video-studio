@@ -67,12 +67,10 @@ async function api(pathname, { method = 'GET', body, cookie, headers = {}, csrf 
 }
 
 test('health and public tool catalogue', async (t) => {
-  await t.test('GET /api/health reports sqlite + configured owner', async () => {
+  await t.test('GET /api/health exposes only the liveness status', async () => {
     const res = await api('/api/health');
     assert.equal(res.status, 200);
-    assert.equal(res.body.status, 'ok');
-    assert.equal(res.body.database, 'sqlite');
-    assert.equal(res.body.ownerConfigured, true);
+    assert.deepEqual(res.body, { status: 'ok' });
   });
 
   await t.test('GET /api/tools lists the four tools as not connected', async () => {
