@@ -170,7 +170,7 @@ export default function Profile() {
           </div>
 
           <div className={`access-pill ${ent?.canGenerate ? 'on' : 'off'}`}>
-            <Icon name={ent?.isOwner ? 'crown' : ent?.isStaff ? 'shield-check' : ent?.hasActiveSubscription ? 'check' : 'lock'} size={16} />
+            <Icon name={ent?.isOwner ? 'crown' : ent?.isStaff ? 'shield' : ent?.hasActiveSubscription ? 'check' : 'lock'} size={16} />
             <span>
               {ent?.isStaff
                 ? ent.isOwner ? 'وصول غير محدود (حساب المالك)' : 'وصول غير محدود (حساب إداري)'
