@@ -213,20 +213,59 @@ export function passwordProblem(password) {
 
 /* -------------------------------- rate limiting -------------------------------- */
 
+/**
+ * Fixed-window counters, keyed by a caller-supplied string.
+ *
+ * The store is hard-bounded: windows that have already elapsed are dropped, and
+ * when the map is genuinely full the oldest insertion is evicted. Without that
+ * bound an attacker could keep submitting fresh keys (one per address) and grow
+ * process memory without limit. Limits and windows themselves are unchanged, so
+ * an in-window counter is still enforced exactly as before.
+ */
+export const RATE_LIMIT_MAX_KEYS = 10000;
+
 const buckets = new Map();
+
+function dropExpired(now) {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+}
 
 export function rateLimit({ key, limit = 12, windowMs = 10 * 60 * 1000 }) {
   const now = Date.now();
-  const bucket = buckets.get(key);
-  if (!bucket || bucket.resetAt < now) {
+  let bucket = buckets.get(key);
+
+  // An elapsed window restarts; the stale entry is removed rather than reused.
+  if (bucket && bucket.resetAt <= now) {
+    buckets.delete(key);
+    bucket = undefined;
+  }
+
+  if (!bucket) {
+    if (buckets.size >= RATE_LIMIT_MAX_KEYS) {
+      dropExpired(now);
+      // Still full: evict oldest insertion (Map preserves insertion order).
+      while (buckets.size >= RATE_LIMIT_MAX_KEYS) {
+        const oldest = buckets.keys().next();
+        if (oldest.done) break;
+        buckets.delete(oldest.value);
+      }
+    }
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     return { allowed: true, remaining: limit - 1 };
   }
+
   bucket.count += 1;
   if (bucket.count > limit) {
     return { allowed: false, remaining: 0, retryAfter: Math.ceil((bucket.resetAt - now) / 1000) };
   }
   return { allowed: true, remaining: limit - bucket.count };
+}
+
+/** Diagnostics: the store can never hold more than RATE_LIMIT_MAX_KEYS entries. */
+export function rateLimitStats() {
+  return { size: buckets.size, max: RATE_LIMIT_MAX_KEYS };
 }
 
 export function resetRateLimits() {

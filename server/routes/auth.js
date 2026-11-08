@@ -17,6 +17,16 @@ import {
 import { getEntitlements, publicUser } from '../entitlements.js';
 import { providerStatus, publicTools } from '../providers.js';
 
+/**
+ * Throwaway scrypt hash of a random value, computed once at start-up.
+ *
+ * Verifying against it when no account matches the submitted address keeps the
+ * "unknown email" path as expensive as a real verification, so response timing
+ * stops revealing which addresses are registered. It is never a real credential
+ * and no user account can ever hold it.
+ */
+const DUMMY_PASSWORD_HASH = hashPassword(crypto.randomBytes(32).toString('base64url'));
+
 export function authRouter(db) {
   const router = express.Router();
 

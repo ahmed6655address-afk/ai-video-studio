@@ -87,27 +87,29 @@ export function createApp(options = {}) {
 
   const api = express.Router();
   api.use(csrfGuard);
-  api.get('/health', (req, res) =>
-    res.json({
-      status: 'ok',
-      app: 'AI VIDEO STUDIO',
-      database: 'sqlite',
-      ownerConfigured: Boolean(owner?.id),
-      time: new Date().toISOString(),
-    })
-  );
+  // Liveness only. Database engine, owner-provisioning state and build detail are
+  // operational information that an unauthenticated caller has no need for.
+  api.get('/health', (req, res) => res.json({ status: 'ok' }));
   api.use('/auth', authRouter(db));
   api.use(publicPlansRouter(db));
   api.use(projectsRouter(db));
   api.use('/admin', requireStaff, adminRouter(db));
 
   api.use((req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
+  // Error responses carry a stable machine code only. Internal detail (SQLite
+  // messages, JSON parser text, driver codes) is written to the server log and
+  // never reaches the client, while every documented code the frontend relies on
+  // is preserved: route handlers still answer directly with their own codes.
   api.use((err, req, res, next) => {
-    console.error('[api-error]', err?.message || err);
     if (res.headersSent) return next(err);
-    res.status(err.status || 500).json({
-      error: err.code || 'INTERNAL_ERROR',
-      messageAr: err.status && err.status < 500 ? err.message : 'حدث خطأ غير متوقع في الخادم.',
+    const status = Number(err?.status) || Number(err?.statusCode) || 500;
+    if (status >= 500) console.error('[api-error]', err?.message || err);
+    const explicitCode =
+      typeof err?.code === 'string' && /^[A-Z][A-Z0-9_]{2,40}$/.test(err.code) ? err.code : null;
+    return res.status(status).json({
+      error: status < 500 ? explicitCode || 'REQUEST_REJECTED' : 'INTERNAL_ERROR',
+      messageAr:
+        status < 500 ? 'تعذّر تنفيذ الطلب. تحقّق من البيانات المرسلة.' : 'حدث خطأ غير متوقع في الخادم.',
     });
   });
 
