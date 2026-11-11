@@ -12,6 +12,7 @@ import NotFound from './pages/NotFound.jsx';
 import Profile from './pages/Profile.jsx';
 import Register from './pages/Register.jsx';
 import ToolPage from './pages/ToolPage.jsx';
+import WhatsAppSupport from './components/WhatsAppSupport.jsx';
 
 function Protected({ children, staffOnly = false }) {
   const { loading, user, entitlements } = useSession();
@@ -42,6 +43,7 @@ export default function App() {
   return (
     <SessionProvider>
       <ToastProvider>
+        <WhatsAppSupport />
         <ScrollReset />
         <Routes>
           <Route path="/" element={<Landing />} />
