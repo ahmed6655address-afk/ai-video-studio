@@ -1,0 +1,28 @@
+{
+  "name": "ai-video-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI VIDEO STUDIO — منصة عربية احترافية لإنشاء الفيديوهات بالذكاء الاصطناعي",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "serve": "npm run build && node server/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.21.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.0"
+  }
+}
