@@ -1,4 +1,4 @@
-const SUPPORT_NUMBER = String(import.meta.env.VITE_WHATSAPP_NUMBER || '').replace(/\D/g, '');
+const SUPPORT_NUMBER = '218923882156';
 const MESSAGE = 'مرحبًا، أريد الاستفسار عن خدمات AI VIDEO STUDIO.';
 
 export default function WhatsAppSupport() {
