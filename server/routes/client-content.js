@@ -122,7 +122,7 @@ export function clientContentRouter(db) {
     const title=body.title===undefined?episode.title:String(body.title).trim();
     const script=body.script===undefined?episode.script:String(body.script).trim();
     const plannedDate=body.plannedDate===undefined?episode.planned_date:(body.plannedDate===null||body.plannedDate===''?null:String(body.plannedDate));
-    if(title.length<1||title.length>120||script.length>12000||(plannedDate!==null&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(plannedDate)))
+    if(title.length<1||title.length>120||script.length>12000||(plannedDate!==null&&!/^\d{4}-\d{2}-\d{2}$/.test(plannedDate)))
       return res.status(400).json({error:'VALIDATION_ERROR',messageAr:'تحقق من عنوان الحلقة والسيناريو وتاريخ التخطيط.'});
     const now=new Date().toISOString();
     const status=script?'script_draft':'idea';
