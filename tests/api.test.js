@@ -577,6 +577,9 @@ test('client content publishing workspace is isolated and subscription-gated', a
     const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
     assert.equal(detail.status, 200);
     assert.equal(detail.body.episodes.length, 1);
+    assert.equal(detail.body.contentPlanDays.length, 60);
+    assert.equal(detail.body.contentPlanDays[0].day_number, 1);
+    assert.equal(detail.body.contentPlanDays[59].day_number, 60);
   });
 
   await t.test('one customer cannot read another customer content project', async () => {
