@@ -382,7 +382,7 @@ test('internal credits wallet requires manual payment review', async (t) => {
     const duplicate = await api('/api/wallet/payment-requests', {
       method: 'POST',
       cookie: state.userCookie,
-      body: { currency: 'USD', amount: 10, paymentReference: 'BANK-TRF-1001' },
+      body: { currency: 'USD', amount: 10, paymentReference: 'bank-trf-1001' },
     });
     assert.equal(duplicate.status, 409);
     assert.equal(duplicate.body.error, 'PAYMENT_REFERENCE_USED');
@@ -418,6 +418,24 @@ test('internal credits wallet requires manual payment review', async (t) => {
     assert.equal(wallet.body.wallet.balance, 100);
     assert.equal(wallet.body.paymentRequests[0].status, 'approved');
   });
+
+  await t.test('rejected transfers never add credits', async () => {
+    const created = await api('/api/wallet/payment-requests', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { currency: 'USD', amount: 5, paymentReference: 'BANK-TRF-1002' },
+    });
+    assert.equal(created.status, 201);
+    const rejected = await api(`/api/admin/payments/${created.body.paymentRequest.id}/reject`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { reviewNote: 'لم يظهر التحويل في كشف الحساب' },
+    });
+    assert.equal(rejected.status, 200);
+    const wallet = await api('/api/wallet', { cookie: state.userCookie });
+    assert.equal(wallet.body.wallet.balance, 100);
+    assert.equal(wallet.body.paymentRequests[0].status, 'rejected');
+  });
 });
 
 test('granting a subscription unlocks generation within plan limits', async (t) => {
@@ -429,6 +447,22 @@ test('granting a subscription unlocks generation within plan limits', async (t) 
     });
     assert.equal(price.status, 200);
     assert.deepEqual(price.body.plan.prices, { LYD: 79, USD: 10 });
+
+    const reusedTransfer = await api(`/api/admin/users/${state.userId}/subscription`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: {
+        planCode: 'starter',
+        months: 1,
+        paymentRef: 'bank-trf-1001',
+        currency: 'LYD',
+        amount: 79,
+        paymentVerified: true,
+        verificationNote: 'تمت مطابقة الحوالة مع كشف الحساب',
+      },
+    });
+    assert.equal(reusedTransfer.status, 409);
+    assert.equal(reusedTransfer.body.error, 'PAYMENT_REFERENCE_USED');
 
     const unverified = await api(`/api/admin/users/${state.userId}/subscription`, {
       method: 'POST',
