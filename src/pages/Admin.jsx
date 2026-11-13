@@ -352,8 +352,8 @@ export default function Admin() {
       await admin.updatePlan(planDraft.code, {
         nameAr: planDraft.nameAr.trim(),
         taglineAr: planDraft.taglineAr.trim(),
-        priceLyd: planDraft.priceLyd === '' ? 0 : Number(planDraft.priceLyd),
-        priceUsd: planDraft.priceUsd === '' ? 0 : Number(planDraft.priceUsd),
+        priceLyd: planDraft.priceLyd === '' ? null : Number(planDraft.priceLyd),
+        priceUsd: planDraft.priceUsd === '' ? null : Number(planDraft.priceUsd),
         isActive: planDraft.isActive,
         limits,
       });
