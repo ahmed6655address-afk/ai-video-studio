@@ -1,6 +1,7 @@
 import express from 'express';
 import { activeSubscription, getEntitlements, monthlyUsage, publicUser } from '../entitlements.js';
 import { TOOL_IDS, providerStatus } from '../providers.js';
+import { creditProviderWallet, providerWalletSummary, releaseGenerationFunds } from '../finance.js';
 
 function serializePlan(row) {
   let features = [];
@@ -271,6 +272,42 @@ export function adminRouter(db) {
     if (!updates.length) return res.status(400).json({ error: 'NO_CHANGES' });
     db.prepare(`UPDATE plans SET ${updates.join(', ')} WHERE code = ?`).run(...params, plan.code);
     res.json({ plan: serializePlan(db.prepare('SELECT * FROM plans WHERE code = ?').get(plan.code)) });
+  });
+
+  // Provider wallet is funded only after an owner verifies an actual top-up
+  // in the provider dashboard. Subscription records are never treated as cash.
+  router.get('/finance', (req, res) => {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_ONLY' });
+    res.json({ wallet: providerWalletSummary(db), pricing: { text_video_usd_per_second: 0.10, reserveBufferPercent: 20 } });
+  });
+
+  router.post('/finance/credits', (req, res) => {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_ONLY' });
+    const { amountCents, reference, note, providerBalanceVerified } = req.body || {};
+    if (providerBalanceVerified !== true) {
+      return res.status(400).json({ error: 'PROVIDER_BALANCE_CONFIRMATION_REQUIRED', messageAr: 'أكد أولاً أن الرصيد أضيف فعليًا إلى حساب المزوّد.' });
+    }
+    try {
+      const wallet = creditProviderWallet(db, { amountCents: Number(amountCents), reference, note, userId: req.user.id });
+      return res.status(201).json({ wallet, messageAr: 'تم تسجيل الرصيد التشغيلي المؤكد.' });
+    } catch (err) {
+      const status = err.code === 'INVALID_AMOUNT' || err.code === 'INVALID_REFERENCE' ? 400 : 409;
+      return res.status(status).json({ error: err.code || 'FINANCE_ENTRY_REJECTED' });
+    }
+  });
+
+  router.post('/finance/reservations/:projectId/release', (req, res) => {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_ONLY' });
+    const { confirmedNoProviderJob, reason } = req.body || {};
+    if (confirmedNoProviderJob !== true) {
+      return res.status(400).json({ error: 'PROVIDER_CHECK_REQUIRED', messageAr: 'تحقق من لوحة المزوّد وأكد عدم إنشاء المهمة قبل تحرير الحجز.' });
+    }
+    try {
+      const released = releaseGenerationFunds(db, Number(req.params.projectId), reason, req.user.id);
+      return res.json({ released, wallet: providerWalletSummary(db) });
+    } catch (err) {
+      return res.status(400).json({ error: err.code || 'RESERVATION_RELEASE_REJECTED' });
+    }
   });
 
   router.get('/providers', (req, res) => {
