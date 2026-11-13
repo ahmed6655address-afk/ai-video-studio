@@ -1,4 +1,5 @@
 import express from 'express';
+import { rateLimit } from '../auth.js';
 
 const TELEGRAM_API = 'https://api.telegram.org';
 
@@ -61,6 +62,14 @@ export function notificationsRouter() {
   router.post('/telegram/test', async (req, res) => {
     if (!req.user || req.user.role !== 'owner') {
       return res.status(req.user ? 403 : 401).json({ error: req.user ? 'OWNER_ONLY' : 'UNAUTHENTICATED' });
+    }
+    const throttle = rateLimit({
+      key: `telegram-test:${String(req.ip || req.socket?.remoteAddress || 'unknown')}`,
+      limit: 3,
+      windowMs: 60_000,
+    });
+    if (!throttle.allowed) {
+      return res.status(429).json({ error: 'RATE_LIMITED', messageAr: 'تجاوزت عدد اختبارات تيليجرام المسموح بها مؤقتًا.' });
     }
     try {
       const result = await sendTelegramMessage(
