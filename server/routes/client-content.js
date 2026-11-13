@@ -54,6 +54,8 @@ export function clientContentRouter(db) {
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id,title,mode,body.category?String(body.category).slice(0,80):null,ideaId,brief,language,dialect,
           JSON.stringify(body.voiceProfile&&typeof body.voiceProfile==='object'?body.voiceProfile:{}),musicChoice,String(body.musicRightsNote||'').slice(0,500),now,now);
       const projectId=Number(info.lastInsertRowid);
+      const calendarInsert=db.prepare('INSERT INTO client_content_calendar_days(project_id,user_id,day_number,planned_date,created_at) VALUES(?,?,?,?,?)');
+      for(let day=0;day<60;day++) { const date=new Date(Date.now()+day*86400000); calendarInsert.run(projectId,req.user.id,day+1,date.toISOString().slice(0,10),now); }
       const episodes=Array.isArray(body.episodes)?body.episodes.slice(0,120):[];
       const insertEpisode=db.prepare('INSERT INTO client_content_episodes(project_id,user_id,episode_number,title,planned_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?)');
       episodes.forEach((ep,i)=>insertEpisode.run(projectId,req.user.id,i+1,String(ep.title||'').slice(0,120),ep.plannedDate?String(ep.plannedDate).slice(0,30):null,now,now));
@@ -71,8 +73,9 @@ export function clientContentRouter(db) {
     if(!project) return res.status(404).json({error:'NOT_FOUND'});
     const episodes=db.prepare('SELECT id,episode_number,title,script,status,planned_date FROM client_content_episodes WHERE project_id=? AND user_id=? ORDER BY episode_number').all(project.id,req.user.id);
     const approvals=db.prepare('SELECT id,episode_id,approval_type,decision,scope_json,created_at FROM client_content_approvals WHERE project_id=? AND user_id=? ORDER BY id DESC').all(project.id,req.user.id);
+    const contentPlanDays=db.prepare('SELECT day_number,planned_date,status FROM client_content_calendar_days WHERE project_id=? AND user_id=? ORDER BY day_number').all(project.id,req.user.id);
     const schedule=db.prepare('SELECT id,episode_id,platform,scheduled_at,status FROM client_content_schedule WHERE project_id=? AND user_id=? ORDER BY scheduled_at LIMIT 200').all(project.id,req.user.id);
-    res.json({project:safeProject(project),episodes,approvals,schedule});
+    res.json({project:safeProject(project),episodes,approvals,schedule,contentPlanDays});
   });
 
   router.post('/client-content/projects/:id/episodes', (req,res) => {
