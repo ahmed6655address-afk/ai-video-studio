@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS client_content_ideas (
   language TEXT NOT NULL DEFAULT 'ar',
   is_active INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS client_content_calendar_days (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL REFERENCES client_content_projects(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day_number INTEGER NOT NULL,
+  planned_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'planning' CHECK (status IN ('planning','content_in_preparation','ready','published','paused')),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id,day_number),
+  UNIQUE(project_id,planned_date)
+);
+CREATE INDEX IF NOT EXISTS idx_cc_calendar_user_date ON client_content_calendar_days(user_id,planned_date);
 CREATE TABLE IF NOT EXISTS client_content_episodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL REFERENCES client_content_projects(id) ON DELETE CASCADE,
