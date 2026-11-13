@@ -150,14 +150,19 @@ export function clientContentRouter(db) {
     const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
     if(!project) return res.status(404).json({error:'NOT_FOUND'});
     const {episodeId=null,approvalType,decision,scope={}}=req.body||{};
-    if(!['script','asset','schedule','publishing_delegation'].includes(approvalType)||!['approved','rejected','revoked'].includes(decision)|| (episodeId!==null&&!db.prepare('SELECT id FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(episodeId),project.id,req.user.id)))
+    const scopeData=scope&&typeof scope==='object'&&!Array.isArray(scope)?scope:{};
+    const scheduleId=scopeData.scheduleId===undefined?null:Number(scopeData.scheduleId);
+    if(!['script','asset','schedule','publishing_delegation'].includes(approvalType)||!['approved','rejected','revoked'].includes(decision)||
+      (episodeId!==null&&!db.prepare('SELECT id FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(episodeId),project.id,req.user.id))||
+      (approvalType==='schedule'&&scheduleId!==null&&(!Number.isInteger(scheduleId)||!db.prepare('SELECT id FROM client_content_schedule WHERE id=? AND project_id=? AND user_id=?').get(scheduleId,project.id,req.user.id))))
       return res.status(400).json({error:'INVALID_APPROVAL'});
     const now=new Date().toISOString();
     const info=db.prepare('INSERT INTO client_content_approvals(project_id,episode_id,user_id,approval_type,decision,scope_json,created_at) VALUES(?,?,?,?,?,?,?)')
-      .run(project.id,episodeId,req.user.id,approvalType,decision,JSON.stringify(scope&&typeof scope==='object'?scope:{}),now);
+      .run(project.id,episodeId,req.user.id,approvalType,decision,JSON.stringify(scopeData),now);
     if(approvalType==='schedule') {
       const nextStatus=decision==='approved'?'approved':decision==='revoked'?'awaiting_approval':'canceled';
-      if(episodeId===null) db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE project_id=? AND user_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,project.id,req.user.id);
+      if(scheduleId!==null) db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE id=? AND project_id=? AND user_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,scheduleId,project.id,req.user.id);
+      else if(episodeId===null) db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE project_id=? AND user_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,project.id,req.user.id);
       else db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE project_id=? AND user_id=? AND episode_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,project.id,req.user.id,Number(episodeId));
     }
     logAudit(db,req.user.id,'approval_recorded',project.id,{approvalId:Number(info.lastInsertRowid),approvalType,decision});
