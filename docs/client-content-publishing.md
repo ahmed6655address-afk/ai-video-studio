@@ -159,6 +159,7 @@ idea, script_draft, script_review, approved, in_production, asset_review, ready_
 - `POST /api/client-content/projects`: إنشاء مشروع مخصص أو مقترح مع تهيئة 60 يوماً.
 - `GET /api/client-content/projects/:id`: تفاصيل المشروع والحلقات والتقويم والموافقات ومقترحات الجدولة.
 - `POST /api/client-content/projects/:id/episodes`: إضافة حلقة.
+- `PATCH /api/client-content/projects/:id/episodes/:episodeId`: تعديل عنوان الحلقة والسيناريو وتاريخ التخطيط؛ يحول التعديل إلى مسودة جديدة.
 - `POST /api/client-content/projects/:id/schedule`: إنشاء مقترح موعد بانتظار الموافقة.
 - `DELETE /api/client-content/projects/:id/schedule/:scheduleId`: إلغاء مقترح أو موعد لم يبدأ تنفيذه.
 - `POST /api/client-content/projects/:id/approvals`: تسجيل موافقة/رفض/سحب تفويض؛ موافقة الجدولة تغيّر حالة المقترح إلى approved فقط.
