@@ -310,8 +310,13 @@ export function adminRouter(db) {
     if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_REQUIRED' });
     const target = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.id));
     if (!target) return res.status(404).json({ error: 'NOT_FOUND' });
-    db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'")
-      .run(new Date().toISOString(), target.id);
+    const now = new Date().toISOString();
+    const changed = db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'")
+      .run(now, target.id);
+    if (changed.changes) {
+      db.prepare('INSERT INTO client_content_audit(user_id,actor_user_id,action,details_json,created_at) VALUES(?,?,?,?,?)')
+        .run(target.id, req.user.id, 'subscription_manually_canceled', '{}', now);
+    }
     res.json({ messageAr: 'تم إلغاء اشتراك إدارة ونشر المحتوى.' });
   });
 
