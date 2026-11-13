@@ -111,6 +111,40 @@ export function clientContentRouter(db) {
     } catch(err) { if(String(err.code).includes('CONSTRAINT')) return res.status(409).json({error:'EPISODE_NUMBER_TAKEN'}); throw err; }
   });
 
+  router.post('/client-content/projects/:id/schedule', (req,res) => {
+    if(!req.user) return res.status(401).json({error:'UNAUTHENTICATED'});
+    if(!hasServiceAccess(req,db)) return res.status(402).json({error:'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED'});
+    const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
+    if(!project) return res.status(404).json({error:'NOT_FOUND'});
+    const {episodeId,platform,scheduledAt}=req.body||{};
+    const allowedPlatforms=['tiktok','instagram','youtube','facebook'];
+    const instant=typeof scheduledAt==='string' && /(?:Z|[+-][0-9]{2}:[0-9]{2})$/.test(scheduledAt) ? Date.parse(scheduledAt) : NaN;
+    if(!allowedPlatforms.includes(platform)||!Number.isFinite(instant)||instant<=Date.now()||instant>Date.now()+365*86400000)
+      return res.status(400).json({error:'INVALID_SCHEDULE',messageAr:'اختر منصة مدعومة وموعداً مستقبلياً واضح المنطقة الزمنية خلال سنة.'});
+    const episode=db.prepare('SELECT id FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(episodeId),project.id,req.user.id);
+    if(!episode) return res.status(404).json({error:'EPISODE_NOT_FOUND'});
+    const now=new Date().toISOString();
+    const existing=db.prepare("SELECT id FROM client_content_schedule WHERE episode_id=? AND platform=? AND status NOT IN ('canceled','failed')").get(episode.id,platform);
+    if(existing) return res.status(409).json({error:'SCHEDULE_ALREADY_EXISTS',messageAr:'توجد جدولة قائمة لهذه الحلقة على المنصة المختارة.'});
+    const info=db.prepare("INSERT INTO client_content_schedule(project_id,episode_id,user_id,platform,scheduled_at,status,created_at,updated_at) VALUES(?,?,?,?,?,'awaiting_approval',?,?)")
+      .run(project.id,episode.id,req.user.id,platform,new Date(instant).toISOString(),now,now);
+    logAudit(db,req.user.id,'schedule_created',project.id,{scheduleId:Number(info.lastInsertRowid),episodeId:episode.id,platform,scheduledAt:new Date(instant).toISOString()});
+    res.status(201).json({schedule:{id:Number(info.lastInsertRowid),episodeId:episode.id,platform,scheduledAt:new Date(instant).toISOString(),status:'awaiting_approval'},
+      messageAr:'تم حفظ موعد مقترح بانتظار موافقتك. لم يتم جدولة نشر خارجي.'});
+  });
+
+  router.delete('/client-content/projects/:id/schedule/:scheduleId', (req,res) => {
+    if(!req.user) return res.status(401).json({error:'UNAUTHENTICATED'});
+    const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
+    if(!project) return res.status(404).json({error:'NOT_FOUND'});
+    const item=db.prepare('SELECT id,status FROM client_content_schedule WHERE id=? AND project_id=? AND user_id=?').get(Number(req.params.scheduleId),project.id,req.user.id);
+    if(!item) return res.status(404).json({error:'SCHEDULE_NOT_FOUND'});
+    if(!['draft','awaiting_approval','approved'].includes(item.status)) return res.status(409).json({error:'SCHEDULE_LOCKED'});
+    db.prepare("UPDATE client_content_schedule SET status='canceled',updated_at=? WHERE id=?").run(new Date().toISOString(),item.id);
+    logAudit(db,req.user.id,'schedule_canceled',project.id,{scheduleId:item.id});
+    res.json({messageAr:'تم إلغاء موعد النشر المقترح.'});
+  });
+
   router.post('/client-content/projects/:id/approvals', (req,res) => {
     if(!req.user) return res.status(401).json({error:'UNAUTHENTICATED'});
     const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
@@ -121,6 +155,11 @@ export function clientContentRouter(db) {
     const now=new Date().toISOString();
     const info=db.prepare('INSERT INTO client_content_approvals(project_id,episode_id,user_id,approval_type,decision,scope_json,created_at) VALUES(?,?,?,?,?,?,?)')
       .run(project.id,episodeId,req.user.id,approvalType,decision,JSON.stringify(scope&&typeof scope==='object'?scope:{}),now);
+    if(approvalType==='schedule') {
+      const nextStatus=decision==='approved'?'approved':decision==='revoked'?'awaiting_approval':'canceled';
+      if(episodeId===null) db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE project_id=? AND user_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,project.id,req.user.id);
+      else db.prepare("UPDATE client_content_schedule SET status=?,updated_at=? WHERE project_id=? AND user_id=? AND episode_id=? AND status IN ('awaiting_approval','approved')").run(nextStatus,now,project.id,req.user.id,Number(episodeId));
+    }
     logAudit(db,req.user.id,'approval_recorded',project.id,{approvalId:Number(info.lastInsertRowid),approvalType,decision});
     res.status(201).json({approvalId:Number(info.lastInsertRowid),decision,messageAr:'تم تسجيل قرار الموافقة. لا ينفذ هذا الإجراء نشراً خارجياً.'});
   });
