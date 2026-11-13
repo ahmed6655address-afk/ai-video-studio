@@ -226,7 +226,7 @@ export function adminRouter(db) {
       return res.status(400).json({ error: 'FREE_PLAN_NOT_ASSIGNABLE', messageAr: 'الخطة المجانية لا تُمنح كاشتراك مدفوع.' });
     }
     const durationMonths = Number(months);
-    const cleanReference = String(paymentRef || '').trim().slice(0, 100);
+    const cleanReference = String(paymentRef || '').trim().toUpperCase().slice(0, 100);
     const cleanNote = String(verificationNote || '').trim().slice(0, 500);
     const amountMinor = parseMoneyMinor(amount, currency, false);
     const expectedMinor = currency === 'LYD' ? plan.price_lyd_minor : currency === 'USD' ? plan.price_usd_minor : null;
@@ -240,7 +240,7 @@ export function adminRouter(db) {
           : 'يلزم مرجع الحوالة والمبلغ المطابق للخطة وتأكيد تحقق المالك وملاحظة المراجعة قبل التفعيل.',
       });
     }
-    if (db.prepare('SELECT id FROM subscriptions WHERE payment_ref = ?').get(cleanReference)) {
+    if (db.prepare('SELECT payment_reference FROM payment_reference_registry WHERE payment_reference = ?').get(cleanReference)) {
       return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الحوالة مستخدم مسبقًا.' });
     }
     const now = new Date();
@@ -248,12 +248,23 @@ export function adminRouter(db) {
 
     const tx = db.transaction(() => {
       db.prepare("UPDATE subscriptions SET status = 'canceled' WHERE user_id = ? AND status = 'active'").run(target.id);
-      db.prepare(
+      const result = db.prepare(
         `INSERT INTO subscriptions (user_id, plan_code, status, started_at, expires_at, payment_ref, currency, amount_minor, created_by, created_at)
          VALUES (?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`
       ).run(target.id, plan.code, now.toISOString(), expires.toISOString(), cleanReference, currency, amountMinor, req.user.id, now.toISOString());
+      db.prepare(
+        `INSERT INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+         VALUES (?, 'subscription', ?, ?, ?)`
+      ).run(cleanReference, Number(result.lastInsertRowid), target.id, now.toISOString());
     });
-    tx();
+    try {
+      tx();
+    } catch (error) {
+      if (String(error?.code || '').includes('CONSTRAINT')) {
+        return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الحوالة مسجل في عملية مالية أخرى.' });
+      }
+      throw error;
+    }
 
     const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(target.id);
     res.status(201).json({
@@ -281,7 +292,10 @@ export function adminRouter(db) {
     const plan = db.prepare('SELECT * FROM plans WHERE code = ?').get(String(req.params.code));
     if (!plan) return res.status(404).json({ error: 'NOT_FOUND' });
 
-    const { nameAr, taglineAr, priceSar, limits, features, isActive } = req.body || {};
+    const { nameAr, taglineAr, limits, features, isActive } = req.body || {};
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'priceSar')) {
+      return res.status(400).json({ error: 'UNSUPPORTED_CURRENCY', messageAr: 'العملات المدعومة هي الدينار الليبي والدولار الأمريكي فقط.' });
+    }
     const updates = [];
     const params = [];
 
@@ -337,7 +351,7 @@ export function adminRouter(db) {
     if (!target) return res.status(404).json({ error: 'NOT_FOUND' });
     if (target.role === 'owner') return res.status(400).json({ error: 'OWNER_UNLIMITED' });
     const planCode = String(req.body?.planCode || '').trim().slice(0, 40);
-    const paymentRef = String(req.body?.paymentRef || '').trim().slice(0, 100);
+    const paymentRef = String(req.body?.paymentRef || '').trim().toUpperCase().slice(0, 100);
     const months = Number(req.body?.months || 1);
     const paymentVerified = req.body?.paymentVerified === true;
     const verificationNote = String(req.body?.verificationNote || '').trim().slice(0, 500);
@@ -345,7 +359,7 @@ export function adminRouter(db) {
         !paymentVerified || verificationNote.length < 8) {
       return res.status(400).json({ error: 'VERIFICATION_REQUIRED', messageAr: 'يلزم تأكيد المالك أنه تحقق يدوياً من وصول الدفعة وإضافة ملاحظة تحقق قبل التفعيل.' });
     }
-    if (db.prepare('SELECT id FROM client_content_subscriptions WHERE payment_ref = ?').get(paymentRef)) {
+    if (db.prepare('SELECT payment_reference FROM payment_reference_registry WHERE payment_reference = ?').get(paymentRef)) {
       return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الدفع مستخدم مسبقاً.' });
     }
     const now = new Date();
@@ -354,11 +368,23 @@ export function adminRouter(db) {
       db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'").run(now.toISOString(), target.id);
       const result = db.prepare(`INSERT INTO client_content_subscriptions(user_id,status,plan_code,starts_at,expires_at,payment_ref,activated_by,created_at,updated_at)
         VALUES(?,'active',?,?,?,?,?,?,?)`).run(target.id, planCode, now.toISOString(), expires.toISOString(), paymentRef, req.user.id, now.toISOString(), now.toISOString());
+      db.prepare(
+        `INSERT INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+         VALUES (?, 'client_content_subscription', ?, ?, ?)`
+      ).run(paymentRef, Number(result.lastInsertRowid), target.id, now.toISOString());
       db.prepare('INSERT INTO client_content_audit(user_id,actor_user_id,action,details_json,created_at) VALUES(?,?,?,?,?)')
         .run(target.id, req.user.id, 'subscription_manually_activated', JSON.stringify({ subscriptionId: Number(result.lastInsertRowid), planCode, paymentRef, verificationNote }), now.toISOString());
       return Number(result.lastInsertRowid);
     });
-    const subscriptionId = tx();
+    let subscriptionId;
+    try {
+      subscriptionId = tx();
+    } catch (error) {
+      if (String(error?.code || '').includes('CONSTRAINT')) {
+        return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الحوالة مسجل في عملية مالية أخرى.' });
+      }
+      throw error;
+    }
     res.status(201).json({ subscription: { id: subscriptionId, userId: target.id, status: 'active', planCode, startsAt: now.toISOString(), expiresAt: expires.toISOString() },
       messageAr: 'تم تسجيل التفعيل الإداري بناءً على تأكيد تحقق المالك يدوياً. لم يتم تنفيذ تحصيل مالي آلي.' });
   });
