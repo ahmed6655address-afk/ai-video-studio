@@ -545,6 +545,13 @@ test('owner identity comes from server env, never from a registrant password', a
 
 
 test('client content publishing workspace is isolated and subscription-gated', async (t) => {
+  const ownerLogin = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+  });
+  assert.equal(ownerLogin.status, 200);
+  state.ownerCookie = ownerLogin.cookie;
+
   await t.test('authenticated users can view ideas but cannot create a workspace without the separate subscription', async () => {
     const view = await api('/api/client-content', { cookie: state.user2Cookie });
     assert.equal(view.status, 200);
