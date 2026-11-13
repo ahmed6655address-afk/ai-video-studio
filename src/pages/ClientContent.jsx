@@ -12,6 +12,7 @@ export default function ClientContent() {
   const [notice,setNotice]=useState('');
   const [detail,setDetail]=useState(null);
   const [scheduleForm,setScheduleForm]=useState({episodeId:'',platform:'youtube',scheduledAt:''});
+  const [episodeForm,setEpisodeForm]=useState({id:null,episodeNumber:1,title:'',script:'',plannedDate:''});
   const load=async()=>{ try { setData(await api('/client-content')); } catch(e) { setError(e.message); } };
   useEffect(()=>{ load(); },[]);
   const update=(key,value)=>setForm(prev=>({...prev,[key]:value}));
@@ -25,8 +26,21 @@ export default function ClientContent() {
   };
   const openProject=async(id)=>{
     setError('');
-    try { const result=await api('/client-content/projects/'+id); setDetail(result); setScheduleForm(prev=>({...prev,episodeId:result.episodes[0]?.id?String(result.episodes[0].id):''})); }
+    try { const result=await api('/client-content/projects/'+id); setDetail(result); setScheduleForm(prev=>({...prev,episodeId:result.episodes[0]?.id?String(result.episodes[0].id):''})); setEpisodeForm({id:null,episodeNumber:Math.max(0,...result.episodes.map(ep=>ep.episode_number))+1,title:'',script:'',plannedDate:''}); }
     catch(err){setError(err.message);}
+  };
+  const saveEpisode=async(e)=>{
+    e.preventDefault(); setError(''); setNotice('');
+    const body={title:episodeForm.title,script:episodeForm.script,plannedDate:episodeForm.plannedDate||null};
+    try {
+      if(episodeForm.id) await api('/client-content/projects/'+detail.project.id+'/episodes/'+episodeForm.id,{method:'PATCH',body});
+      else await api('/client-content/projects/'+detail.project.id+'/episodes',{method:'POST',body:{...body,episodeNumber:Number(episodeForm.episodeNumber)}});
+      setNotice(episodeForm.id?'تم حفظ تعديلات الحلقة كمسودة.':'تمت إضافة الحلقة كمسودة.');
+      await openProject(detail.project.id);
+    } catch(err){setError(err.message);}
+  };
+  const editEpisode=(ep)=>{
+    setEpisodeForm({id:ep.id,episodeNumber:ep.episode_number,title:ep.title||'',script:ep.script||'',plannedDate:ep.planned_date||''});
   };
   const createSchedule=async(e)=>{
     e.preventDefault(); setError(''); setNotice('');
@@ -79,8 +93,16 @@ export default function ClientContent() {
     {detail&&<section className="card card-pad">
       <div className="row-between"><h2 className="section-title">{detail.project.title}</h2><button type="button" className="btn btn-ghost btn-sm" onClick={()=>setDetail(null)}>إغلاق</button></div>
       <p className="muted">خطة المحتوى: {detail.contentPlanDays?.length||0} يوماً · الحلقات: {detail.episodes.length} · مواعيد مقترحة: {detail.schedule.length} · الموافقات: {detail.approvals.length}</p>
-      <h3 className="section-title">الحلقات</h3>
-      <div className="list-stack">{detail.episodes.map(ep=><div className="list-row" key={ep.id}><span><strong>الحلقة {ep.episode_number}: {ep.title||'بدون عنوان'}</strong><small>{ep.status} {ep.planned_date?'· '+ep.planned_date:''}</small></span></div>)}</div>
+      <h3 className="section-title">إدارة الحلقات والسيناريوهات</h3>
+      <div className="list-stack">{detail.episodes.map(ep=><div className="list-row" key={ep.id}><span><strong>الحلقة {ep.episode_number}: {ep.title||'بدون عنوان'}</strong><small>{ep.status} {ep.planned_date?'· '+ep.planned_date:''}</small></span><button type="button" className="btn btn-ghost btn-sm" onClick={()=>editEpisode(ep)}>تعديل</button></div>)}</div>
+      <form onSubmit={saveEpisode} className="form-grid" style={{marginTop:16}}>
+        <div className="field-full"><h4 className="section-title">{episodeForm.id?'تعديل الحلقة':'إضافة حلقة جديدة'}</h4></div>
+        {!episodeForm.id&&<label className="field"><span>رقم الحلقة</span><input type="number" min="1" max="500" required value={episodeForm.episodeNumber} onChange={e=>setEpisodeForm(p=>({...p,episodeNumber:e.target.value}))}/></label>}
+        <label className="field"><span>عنوان الحلقة</span><input required maxLength="120" value={episodeForm.title} onChange={e=>setEpisodeForm(p=>({...p,title:e.target.value}))} placeholder="عنوان واضح للحلقة"/></label>
+        <label className="field"><span>تاريخ التخطيط (اختياري)</span><input type="date" value={episodeForm.plannedDate} onChange={e=>setEpisodeForm(p=>({...p,plannedDate:e.target.value}))}/></label>
+        <label className="field field-full"><span>السيناريو / النص</span><textarea rows="6" maxLength="12000" value={episodeForm.script} onChange={e=>setEpisodeForm(p=>({...p,script:e.target.value}))} placeholder="اكتب أو عدّل سيناريو الحلقة هنا…"/></label>
+        <div className="field-full row" style={{justifyContent:'flex-start',gap:10}}><button type="submit" className="btn btn-primary">{episodeForm.id?'حفظ التعديلات':'إضافة الحلقة'}</button>{episodeForm.id&&<button type="button" className="btn btn-ghost" onClick={()=>setEpisodeForm({id:null,episodeNumber:Math.max(0,...detail.episodes.map(ep=>ep.episode_number))+1,title:'',script:'',plannedDate:''})}>إلغاء التعديل</button>}<span className="small muted">الحفظ ينشئ مسودة ولا يعتمدها أو ينشرها.</span></div>
+      </form>
       <details style={{marginTop:16}}><summary>عرض تقويم التخطيط الكامل ({detail.contentPlanDays?.length||0} يوماً)</summary><div className="list-stack" style={{marginTop:12}}>{(detail.contentPlanDays||[]).map(day=><div className="list-row" key={day.day_number}><span><strong>اليوم {day.day_number}</strong><small>{day.planned_date} · {day.status}</small></span></div>)}</div></details>
       <h3 className="section-title" style={{marginTop:20}}>اقتراح موعد نشر</h3>
       <form onSubmit={createSchedule} className="form-grid">
