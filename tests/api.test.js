@@ -594,11 +594,21 @@ test('client content publishing workspace is isolated and subscription-gated', a
     assert.equal(access.body.serviceAccess, true);
   });
 
+  await t.test('client-upload music requires a rights declaration', async () => {
+    const invalid = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'مشروع موسيقى', creationMode: 'custom', brief: 'مشروع تجريبي للتحقق من حقوق الموسيقى', musicChoice: 'client_upload' },
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.error, 'MUSIC_RIGHTS_REQUIRED');
+  });
+
   await t.test('owner can create a private project and its episode', async () => {
     const create = await api('/api/client-content/projects', {
       method: 'POST',
       cookie: state.ownerCookie,
-      body: { title: 'حكايات الصحراء', creationMode: 'custom', brief: 'سلسلة قصصية عن الصحراء وشخصياتها', language: 'ar', dialect: 'ليبية', musicChoice: 'none' },
+      body: { title: 'حكايات الصحراء', creationMode: 'custom', brief: 'سلسلة قصصية عن الصحراء وشخصياتها', language: 'ar', dialect: 'ليبية', musicChoice: 'none', voiceProfile: { gender: 'female', tone: 'documentary', speed: 'normal', voiceIdentity: 'الراوي الرئيسي' } },
     });
     assert.equal(create.status, 201);
     assert.equal(create.body.project.title, 'حكايات الصحراء');
@@ -612,6 +622,7 @@ test('client content publishing workspace is isolated and subscription-gated', a
     const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
     assert.equal(detail.status, 200);
     assert.equal(detail.body.episodes.length, 1);
+    assert.equal(detail.body.project.voiceProfile.voiceIdentity, 'الراوي الرئيسي');
     assert.equal(detail.body.contentPlanDays.length, 60);
     assert.equal(detail.body.contentPlanDays[0].day_number, 1);
     assert.equal(detail.body.contentPlanDays[59].day_number, 60);
