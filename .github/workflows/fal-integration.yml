@@ -1,0 +1,32 @@
+name: fal.ai integration checks
+
+on:
+  push:
+    branches:
+      - feature/fal-wan-text-to-video
+  pull_request:
+    branches:
+      - appjet
+
+permissions:
+  contents: read
+
+jobs:
+  verify-fal-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check changed server and test syntax
+        run: |
+          node --check server/providers.js
+          node --check server/routes/projects.js
+          node --check tests/api.test.js
+      - name: Run API tests (mocked provider; no paid API calls)
+        run: node --test tests/api.test.js
+      - name: Build frontend
+        run: npm run build
