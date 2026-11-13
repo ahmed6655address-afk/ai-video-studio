@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { CLIENT_CONTENT_SCHEMA, seedClientContentIdeas } from './client-content/schema.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -133,7 +134,9 @@ export function createDb(file) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  db.exec(CLIENT_CONTENT_SCHEMA);
   seedPlans(db);
+  seedClientContentIdeas(db);
   return db;
 }
 
