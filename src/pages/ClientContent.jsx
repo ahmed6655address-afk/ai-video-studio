@@ -35,10 +35,10 @@ export default function ClientContent() {
       setNotice('تم حفظ مقترح الموعد بانتظار الموافقة. لم يتم النشر.'); await openProject(detail.project.id);
     } catch(err){setError(err.message);}
   };
-  const decideSchedule=async(decision)=>{
+  const decideSchedule=async(decision,scheduleId,episodeId)=>{
     setError('');
     try {
-      await api('/client-content/projects/'+detail.project.id+'/approvals',{method:'POST',body:{approvalType:'schedule',decision,scope:{source:'client_workspace'}}});
+      await api('/client-content/projects/'+detail.project.id+'/approvals',{method:'POST',body:{episodeId,approvalType:'schedule',decision,scope:{scheduleId,source:'client_workspace'}}});
       await openProject(detail.project.id);
     } catch(err){setError(err.message);}
   };
@@ -90,7 +90,7 @@ export default function ClientContent() {
         <div className="field-full"><button type="submit" className="btn btn-primary" disabled={!detail.episodes.length||!scheduleForm.episodeId||!scheduleForm.scheduledAt}>حفظ الموعد للمراجعة</button></div>
       </form>
       <h3 className="section-title" style={{marginTop:20}}>مقترحات الجدولة والموافقات</h3>
-      {!detail.schedule.length?<p className="muted">لا توجد مواعيد مقترحة.</p>:<div className="list-stack">{detail.schedule.map(item=><div className="list-row" key={item.id}><span><strong>{item.platform} · {new Date(item.scheduled_at).toLocaleString('ar')}</strong><small>{item.status} · الحلقة #{item.episode_id}</small></span>{item.status==='awaiting_approval'&&<div className="row"><button type="button" className="btn btn-primary btn-sm" onClick={()=>decideSchedule('approved')}>موافقة</button><button type="button" className="btn btn-ghost btn-sm" onClick={()=>decideSchedule('rejected')}>رفض</button></div>}</div>)}</div>}
+      {!detail.schedule.length?<p className="muted">لا توجد مواعيد مقترحة.</p>:<div className="list-stack">{detail.schedule.map(item=><div className="list-row" key={item.id}><span><strong>{item.platform} · {new Date(item.scheduled_at).toLocaleString('ar')}</strong><small>{item.status} · الحلقة #{item.episode_id}</small></span>{item.status==='awaiting_approval'&&<div className="row"><button type="button" className="btn btn-primary btn-sm" onClick={()=>decideSchedule('approved',item.id,item.episode_id)}>موافقة</button><button type="button" className="btn btn-ghost btn-sm" onClick={()=>decideSchedule('rejected',item.id,item.episode_id)}>رفض</button></div>}</div>)}</div>}
       <p className="small muted">هذه مواعيد داخلية فقط. لا يوجد ربط اجتماعي نشط في هذه المرحلة ولا يتم نشر أي محتوى خارجياً.</p>
     </section>}
     <p className="small muted"><Link to="/app">العودة إلى لوحة التحكم</Link></p>
