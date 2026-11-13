@@ -116,12 +116,12 @@ export function clientContentRouter(db) {
     if(!hasServiceAccess(req,db)) return res.status(402).json({error:'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED'});
     const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
     if(!project) return res.status(404).json({error:'NOT_FOUND'});
-    const episode=db.prepare('SELECT id,title,script,status FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(req.params.episodeId),project.id,req.user.id);
+    const episode=db.prepare('SELECT id,title,script,status,planned_date FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(req.params.episodeId),project.id,req.user.id);
     if(!episode) return res.status(404).json({error:'EPISODE_NOT_FOUND'});
     const body=req.body||{};
     const title=body.title===undefined?episode.title:String(body.title).trim();
     const script=body.script===undefined?episode.script:String(body.script).trim();
-    const plannedDate=body.plannedDate===undefined?null:(body.plannedDate===null||body.plannedDate===''?null:String(body.plannedDate));
+    const plannedDate=body.plannedDate===undefined?episode.planned_date:(body.plannedDate===null||body.plannedDate===''?null:String(body.plannedDate));
     if(title.length<1||title.length>120||script.length>12000||(plannedDate!==null&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(plannedDate)))
       return res.status(400).json({error:'VALIDATION_ERROR',messageAr:'تحقق من عنوان الحلقة والسيناريو وتاريخ التخطيط.'});
     const now=new Date().toISOString();
