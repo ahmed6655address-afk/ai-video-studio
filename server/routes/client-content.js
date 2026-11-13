@@ -111,6 +111,27 @@ export function clientContentRouter(db) {
     } catch(err) { if(String(err.code).includes('CONSTRAINT')) return res.status(409).json({error:'EPISODE_NUMBER_TAKEN'}); throw err; }
   });
 
+  router.patch('/client-content/projects/:id/episodes/:episodeId', (req,res) => {
+    if(!req.user) return res.status(401).json({error:'UNAUTHENTICATED'});
+    if(!hasServiceAccess(req,db)) return res.status(402).json({error:'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED'});
+    const project=db.prepare('SELECT id FROM client_content_projects WHERE id=? AND user_id=?').get(Number(req.params.id),req.user.id);
+    if(!project) return res.status(404).json({error:'NOT_FOUND'});
+    const episode=db.prepare('SELECT id,title,script,status FROM client_content_episodes WHERE id=? AND project_id=? AND user_id=?').get(Number(req.params.episodeId),project.id,req.user.id);
+    if(!episode) return res.status(404).json({error:'EPISODE_NOT_FOUND'});
+    const body=req.body||{};
+    const title=body.title===undefined?episode.title:String(body.title).trim();
+    const script=body.script===undefined?episode.script:String(body.script).trim();
+    const plannedDate=body.plannedDate===undefined?null:(body.plannedDate===null||body.plannedDate===''?null:String(body.plannedDate));
+    if(title.length<1||title.length>120||script.length>12000||(plannedDate!==null&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(plannedDate)))
+      return res.status(400).json({error:'VALIDATION_ERROR',messageAr:'تحقق من عنوان الحلقة والسيناريو وتاريخ التخطيط.'});
+    const now=new Date().toISOString();
+    const status=script?'script_draft':'idea';
+    db.prepare('UPDATE client_content_episodes SET title=?,script=?,planned_date=?,status=?,updated_at=? WHERE id=? AND project_id=? AND user_id=?')
+      .run(title,script,plannedDate,status,now,episode.id,project.id,req.user.id);
+    logAudit(db,req.user.id,'episode_updated',project.id,{episodeId:episode.id,status});
+    res.json({episode:{id:episode.id,title,script,plannedDate,status},messageAr:'تم حفظ تعديلات الحلقة كمسودة. يلزم اعتماد المحتوى قبل أي نشر.'});
+  });
+
   router.post('/client-content/projects/:id/schedule', (req,res) => {
     if(!req.user) return res.status(401).json({error:'UNAUTHENTICATED'});
     if(!hasServiceAccess(req,db)) return res.status(402).json({error:'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED'});
