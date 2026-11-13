@@ -162,7 +162,7 @@ export function projectsRouter(db) {
     res.json({ projects: rows.map(serializeProject), total, limit, offset });
   });
 
-  router.get('/projects/:id', (req, res) => {
+  router.get('/projects/:id', async (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'UNAUTHENTICATED' });
     let project = db.prepare('SELECT * FROM projects WHERE id = ?').get(Number(req.params.id));
     if (!project) return res.status(404).json({ error: 'NOT_FOUND' });
