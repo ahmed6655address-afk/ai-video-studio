@@ -118,6 +118,15 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user ON wallet_ledger(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS payment_reference_registry (
+  payment_reference TEXT PRIMARY KEY COLLATE NOCASE,
+  source_type TEXT NOT NULL CHECK (source_type IN ('wallet_topup', 'subscription', 'client_content_subscription')),
+  source_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payment_reference_user ON payment_reference_registry(user_id, created_at DESC);
 `;
 
 export const DEFAULT_PLANS = [
@@ -136,7 +145,7 @@ export const DEFAULT_PLANS = [
     code: 'starter',
     name_ar: 'البداية',
     tagline_ar: 'للمبدعين الأفراد',
-    price_sar: 79,
+    price_sar: 0,
     price_lyd_minor: null,
     price_usd_minor: null,
     limits: [10, 5, 20, 5],
@@ -147,7 +156,7 @@ export const DEFAULT_PLANS = [
     code: 'pro',
     name_ar: 'الاحترافية',
     tagline_ar: 'للصناع والمؤثرين',
-    price_sar: 199,
+    price_sar: 0,
     price_lyd_minor: null,
     price_usd_minor: null,
     limits: [40, 25, 80, 25],
@@ -158,7 +167,7 @@ export const DEFAULT_PLANS = [
     code: 'studio',
     name_ar: 'الاستوديو',
     tagline_ar: 'للفرق والوكالات',
-    price_sar: 499,
+    price_sar: 0,
     price_lyd_minor: null,
     price_usd_minor: null,
     limits: [150, 100, 300, 100],
@@ -176,6 +185,7 @@ export function createDb(file) {
   db.exec(SCHEMA);
   migrateWalletAndCurrencySchema(db);
   db.exec(CLIENT_CONTENT_SCHEMA);
+  migratePaymentReferenceRegistry(db);
   seedPlans(db);
   seedClientContentIdeas(db);
   return db;
@@ -194,6 +204,25 @@ export function migrateWalletAndCurrencySchema(db) {
   ensureColumn('plans', 'price_usd_minor', 'INTEGER');
   ensureColumn('subscriptions', 'currency', "TEXT CHECK (currency IS NULL OR currency IN ('LYD', 'USD'))");
   ensureColumn('subscriptions', 'amount_minor', 'INTEGER CHECK (amount_minor IS NULL OR amount_minor >= 0)');
+}
+
+export function migratePaymentReferenceRegistry(db) {
+  const register = db.prepare(
+    `INSERT OR IGNORE INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+     SELECT UPPER(TRIM(payment_ref)), 'subscription', id, user_id, created_at
+     FROM subscriptions WHERE payment_ref IS NOT NULL AND TRIM(payment_ref) <> ''`
+  );
+  register.run();
+  db.prepare(
+    `INSERT OR IGNORE INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+     SELECT UPPER(TRIM(payment_reference)), 'wallet_topup', id, user_id, created_at
+     FROM wallet_payment_requests WHERE payment_reference IS NOT NULL AND TRIM(payment_reference) <> ''`
+  ).run();
+  db.prepare(
+    `INSERT OR IGNORE INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+     SELECT UPPER(TRIM(payment_ref)), 'client_content_subscription', id, user_id, created_at
+     FROM client_content_subscriptions WHERE payment_ref IS NOT NULL AND TRIM(payment_ref) <> ''`
+  ).run();
 }
 
 export function seedPlans(db) {
