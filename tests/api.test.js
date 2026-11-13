@@ -542,3 +542,61 @@ test('owner identity comes from server env, never from a registrant password', a
     }
   });
 });
+
+
+test('client content publishing workspace is isolated and subscription-gated', async (t) => {
+  await t.test('authenticated users can view ideas but cannot create a workspace without the separate subscription', async () => {
+    const view = await api('/api/client-content', { cookie: state.userCookie });
+    assert.equal(view.status, 200);
+    assert.equal(view.body.serviceAccess, false);
+    assert.ok(view.body.ideas.length >= 5);
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { title: 'سلسلة تجريبية', creationMode: 'custom', brief: 'قصة تجريبية طويلة للاختبار', language: 'ar' },
+    });
+    assert.equal(create.status, 402);
+    assert.equal(create.body.error, 'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED');
+  });
+
+  await t.test('owner can create a private project and its episode', async () => {
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'حكايات الصحراء', creationMode: 'custom', brief: 'سلسلة قصصية عن الصحراء وشخصياتها', language: 'ar', dialect: 'ليبية', musicChoice: 'none' },
+    });
+    assert.equal(create.status, 201);
+    assert.equal(create.body.project.title, 'حكايات الصحراء');
+    const projectId = create.body.project.id;
+    const episode = await api('/api/client-content/projects/' + projectId + '/episodes', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeNumber: 1, title: 'البداية' },
+    });
+    assert.equal(episode.status, 201);
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.episodes.length, 1);
+  });
+
+  await t.test('one customer cannot read another customer content project', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.userCookie });
+    assert.equal(denied.status, 404);
+  });
+
+  await t.test('approval records are stored without triggering external publishing', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    const episodeId = detail.body.episodes[0].id;
+    const approval = await api('/api/client-content/projects/' + projectId + '/approvals', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, approvalType: 'script', decision: 'approved', scope: { revision: 1 } },
+    });
+    assert.equal(approval.status, 201);
+    assert.match(approval.body.messageAr, /لا ينفذ/);
+  });
+});
