@@ -282,8 +282,14 @@ export function adminRouter(db) {
     const planCode = String(req.body?.planCode || '').trim().slice(0, 40);
     const paymentRef = String(req.body?.paymentRef || '').trim().slice(0, 100);
     const months = Number(req.body?.months || 1);
-    if (!planCode || !paymentRef || paymentRef.length < 3 || !Number.isInteger(months) || months < 1 || months > 12) {
-      return res.status(400).json({ error: 'VALIDATION_ERROR', messageAr: 'يلزم رمز باقة ومرجع دفع متحقق ومدة من شهر إلى 12 شهراً.' });
+    const paymentVerified = req.body?.paymentVerified === true;
+    const verificationNote = String(req.body?.verificationNote || '').trim().slice(0, 500);
+    if (!planCode || !paymentRef || paymentRef.length < 3 || !Number.isInteger(months) || months < 1 || months > 12 ||
+        !paymentVerified || verificationNote.length < 8) {
+      return res.status(400).json({ error: 'VERIFICATION_REQUIRED', messageAr: 'يلزم تأكيد المالك أنه تحقق يدوياً من وصول الدفعة وإضافة ملاحظة تحقق قبل التفعيل.' });
+    }
+    if (db.prepare('SELECT id FROM client_content_subscriptions WHERE payment_ref = ?').get(paymentRef)) {
+      return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الدفع مستخدم مسبقاً.' });
     }
     const now = new Date();
     const expires = new Date(now.getTime() + months * 30 * 24 * 60 * 60 * 1000);
@@ -291,11 +297,13 @@ export function adminRouter(db) {
       db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'").run(now.toISOString(), target.id);
       const result = db.prepare(`INSERT INTO client_content_subscriptions(user_id,status,plan_code,starts_at,expires_at,payment_ref,activated_by,created_at,updated_at)
         VALUES(?,'active',?,?,?,?,?,?,?)`).run(target.id, planCode, now.toISOString(), expires.toISOString(), paymentRef, req.user.id, now.toISOString(), now.toISOString());
+      db.prepare('INSERT INTO client_content_audit(user_id,actor_user_id,action,details_json,created_at) VALUES(?,?,?,?,?)')
+        .run(target.id, req.user.id, 'subscription_manually_activated', JSON.stringify({ subscriptionId: Number(result.lastInsertRowid), planCode, paymentRef, verificationNote }), now.toISOString());
       return Number(result.lastInsertRowid);
     });
     const subscriptionId = tx();
     res.status(201).json({ subscription: { id: subscriptionId, userId: target.id, status: 'active', planCode, startsAt: now.toISOString(), expiresAt: expires.toISOString() },
-      messageAr: 'تم تسجيل التفعيل الإداري. لم يتم تنفيذ تحصيل مالي آلي.' });
+      messageAr: 'تم تسجيل التفعيل الإداري بناءً على تأكيد تحقق المالك يدوياً. لم يتم تنفيذ تحصيل مالي آلي.' });
   });
 
   router.delete('/client-content/subscriptions/:id', (req, res) => {
