@@ -542,3 +542,149 @@ test('owner identity comes from server env, never from a registrant password', a
     }
   });
 });
+
+
+test('client content publishing workspace is isolated and subscription-gated', async (t) => {
+  const ownerLogin = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+  });
+  assert.equal(ownerLogin.status, 200);
+  state.ownerCookie = ownerLogin.cookie;
+
+  await t.test('authenticated users can view ideas but cannot create a workspace without the separate subscription', async () => {
+    const view = await api('/api/client-content', { cookie: state.user2Cookie });
+    assert.equal(view.status, 200);
+    assert.equal(view.body.serviceAccess, false);
+    assert.ok(view.body.ideas.length >= 5);
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { title: 'سلسلة تجريبية', creationMode: 'custom', brief: 'قصة تجريبية طويلة للاختبار', language: 'ar' },
+    });
+    assert.equal(create.status, 402);
+    assert.equal(create.body.error, 'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED');
+  });
+
+  await t.test('only the owner can activate a manually verified content subscription', async () => {
+    const me = await api('/api/auth/me', { cookie: state.user2Cookie });
+    const denied = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001' },
+    });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'FORBIDDEN');
+
+    const unverified = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-UNVERIFIED' },
+    });
+    assert.equal(unverified.status, 400);
+    assert.equal(unverified.body.error, 'VERIFICATION_REQUIRED');
+
+    const activated = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001', paymentVerified: true, verificationNote: 'تم التحقق من كشف الدفع يدوياً' },
+    });
+    assert.equal(activated.status, 201);
+    const access = await api('/api/client-content', { cookie: state.user2Cookie });
+    assert.equal(access.body.serviceAccess, true);
+  });
+
+  await t.test('client-upload music requires a rights declaration', async () => {
+    const invalid = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'مشروع موسيقى', creationMode: 'custom', brief: 'مشروع تجريبي للتحقق من حقوق الموسيقى', musicChoice: 'client_upload' },
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.error, 'MUSIC_RIGHTS_REQUIRED');
+  });
+
+  await t.test('owner can create a private project and its episode', async () => {
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'حكايات الصحراء', creationMode: 'custom', brief: 'سلسلة قصصية عن الصحراء وشخصياتها', language: 'ar', dialect: 'ليبية', musicChoice: 'none', voiceProfile: { gender: 'female', tone: 'documentary', speed: 'normal', voiceIdentity: 'الراوي الرئيسي' } },
+    });
+    assert.equal(create.status, 201);
+    assert.equal(create.body.project.title, 'حكايات الصحراء');
+    const projectId = create.body.project.id;
+    const episode = await api('/api/client-content/projects/' + projectId + '/episodes', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeNumber: 1, title: 'البداية' },
+    });
+    assert.equal(episode.status, 201);
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.episodes.length, 1);
+    assert.equal(detail.body.project.voiceProfile.voiceIdentity, 'الراوي الرئيسي');
+    assert.equal(detail.body.contentPlanDays.length, 60);
+    assert.equal(detail.body.contentPlanDays[0].day_number, 1);
+    assert.equal(detail.body.contentPlanDays[59].day_number, 60);
+
+    const edited = await api('/api/client-content/projects/' + projectId + '/episodes/' + episode.body.episode.id, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { title: 'البداية الجديدة', script: 'مشهد افتتاحي يعرّف بالشخصيات ويهيئ أحداث السلسلة.', plannedDate: '2026-11-15' },
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.episode.status, 'script_draft');
+    const refreshed = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(refreshed.body.episodes[0].title, 'البداية الجديدة');
+    assert.equal(refreshed.body.episodes[0].planned_date, '2026-11-15');
+    assert.match(refreshed.body.episodes[0].script, /مشهد افتتاحي/);
+  });
+
+  await t.test('one customer cannot read another customer content project', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.user2Cookie });
+    assert.equal(denied.status, 404);
+    const episodeId = (await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie })).body.episodes[0].id;
+    const deniedEdit = await api('/api/client-content/projects/' + projectId + '/episodes/' + episodeId, {
+      method: 'PATCH', cookie: state.user2Cookie, body: { title: 'محاولة تعديل غير مصرح بها' },
+    });
+    assert.equal(deniedEdit.status, 404);
+  });
+
+  await t.test('approval records are stored without triggering external publishing', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    const episodeId = detail.body.episodes[0].id;
+    const scheduledAt = new Date(Date.now() + 2 * 86400000).toISOString();
+    const proposed = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'youtube', scheduledAt },
+    });
+    assert.equal(proposed.status, 201);
+    assert.equal(proposed.body.schedule.status, 'awaiting_approval');
+    const secondProposal = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'instagram', scheduledAt: new Date(Date.now() + 3 * 86400000).toISOString() },
+    });
+    assert.equal(secondProposal.status, 201);
+
+    const approval = await api('/api/client-content/projects/' + projectId + '/approvals', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, approvalType: 'schedule', decision: 'approved', scope: { scheduleId: proposed.body.schedule.id, revision: 1 } },
+    });
+    assert.equal(approval.status, 201);
+    assert.match(approval.body.messageAr, /لا ينفذ/);
+    const afterApproval = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    const approvedItem = afterApproval.body.schedule.find(item => item.id === proposed.body.schedule.id);
+    const pendingItem = afterApproval.body.schedule.find(item => item.id === secondProposal.body.schedule.id);
+    assert.equal(approvedItem.status, 'approved');
+    assert.equal(approvedItem.platform, 'youtube');
+    assert.equal(pendingItem.status, 'awaiting_approval', 'approval must not approve another platform schedule');
+    assert.equal(approvedItem.external_post_id, undefined);
+  });
+});

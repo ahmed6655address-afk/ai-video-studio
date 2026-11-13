@@ -49,6 +49,7 @@ export default function Layout({ children }) {
   const navItems = [
     { to: '/app', label: 'لوحة التحكم', icon: 'grid', end: true },
     { to: '/app/history', label: 'سجل الفيديوهات', icon: 'history' },
+    { to: '/app/client-content', label: 'إدارة محتوى العملاء', icon: 'calendar' },
     { to: '/app/profile', label: 'ملفي الشخصي', icon: 'user' },
   ];
   if (entitlements?.isStaff) {
@@ -141,6 +142,10 @@ export default function Layout({ children }) {
         <NavLink to="/app/history" className={linkClass}>
           <Icon name="history" size={20} />
           <span>السجل</span>
+        </NavLink>
+        <NavLink to="/app/client-content" className={linkClass}>
+          <Icon name="calendar" size={20} />
+          <span>محتوى العملاء</span>
         </NavLink>
         <NavLink to="/app/profile" className={linkClass}>
           <Icon name="user" size={20} />
