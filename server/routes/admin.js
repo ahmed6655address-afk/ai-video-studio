@@ -278,7 +278,17 @@ export function adminRouter(db) {
   // in the provider dashboard. Subscription records are never treated as cash.
   router.get('/finance', (req, res) => {
     if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_ONLY' });
-    res.json({ wallet: providerWalletSummary(db), pricing: { text_video_usd_per_second: 0.10, reserveBufferPercent: 20 } });
+    const pendingReservations = db.prepare(
+      `SELECT r.project_id AS projectId, r.amount_cents AS amountCents, r.created_at AS createdAt,
+              p.status AS projectStatus, p.provider_job_id AS providerJobId
+       FROM provider_wallet_reservations r JOIN projects p ON p.id = r.project_id
+       WHERE r.status = 'reserved' ORDER BY r.created_at ASC LIMIT 100`
+    ).all();
+    res.json({
+      wallet: providerWalletSummary(db),
+      pendingReservations,
+      pricing: { text_video_usd_per_second: 0.10, reserveBufferPercent: 20 },
+    });
   });
 
   router.post('/finance/credits', (req, res) => {
