@@ -11,6 +11,7 @@ export default function ClientContent() {
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const [detail,setDetail]=useState(null);
+  const [scheduleForm,setScheduleForm]=useState({episodeId:'',platform:'youtube',scheduledAt:''});
   const load=async()=>{ try { setData(await api('/client-content')); } catch(e) { setError(e.message); } };
   useEffect(()=>{ load(); },[]);
   const update=(key,value)=>setForm(prev=>({...prev,[key]:value}));
@@ -24,8 +25,22 @@ export default function ClientContent() {
   };
   const openProject=async(id)=>{
     setError('');
-    try { setDetail(await api('/client-content/projects/'+id)); }
+    try { const result=await api('/client-content/projects/'+id); setDetail(result); setScheduleForm(prev=>({...prev,episodeId:result.episodes[0]?.id?String(result.episodes[0].id):''})); }
     catch(err){setError(err.message);}
+  };
+  const createSchedule=async(e)=>{
+    e.preventDefault(); setError(''); setNotice('');
+    try {
+      await api('/client-content/projects/'+detail.project.id+'/schedule',{method:'POST',body:{episodeId:Number(scheduleForm.episodeId),platform:scheduleForm.platform,scheduledAt:new Date(scheduleForm.scheduledAt).toISOString()}});
+      setNotice('تم حفظ مقترح الموعد بانتظار الموافقة. لم يتم النشر.'); await openProject(detail.project.id);
+    } catch(err){setError(err.message);}
+  };
+  const decideSchedule=async(decision)=>{
+    setError('');
+    try {
+      await api('/client-content/projects/'+detail.project.id+'/approvals',{method:'POST',body:{approvalType:'schedule',decision,scope:{source:'client_workspace'}}});
+      await openProject(detail.project.id);
+    } catch(err){setError(err.message);}
   };
   if(!data&&!error) return <section className="card card-pad"><p>جارٍ تحميل مساحة إدارة المحتوى…</p></section>;
   return <div className="page-stack" dir="rtl">
@@ -61,7 +76,23 @@ export default function ClientContent() {
       <div className="row-between"><h2 className="section-title">مشاريعي</h2><span className="badge badge-neutral">{data?.projects?.length||0} مشروع</span></div>
       {!data?.projects?.length?<p className="muted">لا توجد مشاريع محتوى بعد.</p>:<div className="list-stack">{data.projects.map(p=><button key={p.id} className="list-row" type="button" onClick={()=>openProject(p.id)}><span><strong>{p.title}</strong><small>{p.creationMode==='custom'?'محتوى مخصص':'فكرة مقترحة'} · {p.language.toUpperCase()} · {p.status}</small></span><span aria-hidden="true">←</span></button>)}</div>}
     </section>
-    {detail&&<section className="card card-pad"><div className="row-between"><h2 className="section-title">{detail.project.title}</h2><button type="button" className="btn btn-ghost btn-sm" onClick={()=>setDetail(null)}>إغلاق</button></div><p className="muted">خطة المحتوى: {detail.contentPlanDays?.length||0} يوماً · الحلقات: {detail.episodes.length} · جدول النشر: {detail.schedule.length} · الموافقات: {detail.approvals.length}</p><div className="list-stack">{detail.episodes.map(ep=><div className="list-row" key={ep.id}><span><strong>الحلقة {ep.episode_number}: {ep.title||'بدون عنوان'}</strong><small>{ep.status} {ep.planned_date?'· '+ep.planned_date:''}</small></span></div>)}</div><p className="small muted">لا يوجد ربط اجتماعي نشط في هذه المرحلة؛ لا يتم نشر أي محتوى خارجياً.</p></section>}
+    {detail&&<section className="card card-pad">
+      <div className="row-between"><h2 className="section-title">{detail.project.title}</h2><button type="button" className="btn btn-ghost btn-sm" onClick={()=>setDetail(null)}>إغلاق</button></div>
+      <p className="muted">خطة المحتوى: {detail.contentPlanDays?.length||0} يوماً · الحلقات: {detail.episodes.length} · مواعيد مقترحة: {detail.schedule.length} · الموافقات: {detail.approvals.length}</p>
+      <h3 className="section-title">الحلقات</h3>
+      <div className="list-stack">{detail.episodes.map(ep=><div className="list-row" key={ep.id}><span><strong>الحلقة {ep.episode_number}: {ep.title||'بدون عنوان'}</strong><small>{ep.status} {ep.planned_date?'· '+ep.planned_date:''}</small></span></div>)}</div>
+      <details style={{marginTop:16}}><summary>عرض تقويم التخطيط الكامل ({detail.contentPlanDays?.length||0} يوماً)</summary><div className="list-stack" style={{marginTop:12}}>{(detail.contentPlanDays||[]).map(day=><div className="list-row" key={day.day_number}><span><strong>اليوم {day.day_number}</strong><small>{day.planned_date} · {day.status}</small></span></div>)}</div></details>
+      <h3 className="section-title" style={{marginTop:20}}>اقتراح موعد نشر</h3>
+      <form onSubmit={createSchedule} className="form-grid">
+        <label className="field"><span>الحلقة</span><select required value={scheduleForm.episodeId} onChange={e=>setScheduleForm(p=>({...p,episodeId:e.target.value}))}><option value="">اختر حلقة</option>{detail.episodes.map(ep=><option key={ep.id} value={ep.id}>الحلقة {ep.episode_number} — {ep.title}</option>)}</select></label>
+        <label className="field"><span>المنصة</span><select value={scheduleForm.platform} onChange={e=>setScheduleForm(p=>({...p,platform:e.target.value}))}><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option></select></label>
+        <label className="field"><span>الموعد المحلي المقترح</span><input type="datetime-local" required value={scheduleForm.scheduledAt} onChange={e=>setScheduleForm(p=>({...p,scheduledAt:e.target.value}))}/></label>
+        <div className="field-full"><button type="submit" className="btn btn-primary" disabled={!detail.episodes.length||!scheduleForm.episodeId||!scheduleForm.scheduledAt}>حفظ الموعد للمراجعة</button></div>
+      </form>
+      <h3 className="section-title" style={{marginTop:20}}>مقترحات الجدولة والموافقات</h3>
+      {!detail.schedule.length?<p className="muted">لا توجد مواعيد مقترحة.</p>:<div className="list-stack">{detail.schedule.map(item=><div className="list-row" key={item.id}><span><strong>{item.platform} · {new Date(item.scheduled_at).toLocaleString('ar')}</strong><small>{item.status} · الحلقة #{item.episode_id}</small></span>{item.status==='awaiting_approval'&&<div className="row"><button type="button" className="btn btn-primary btn-sm" onClick={()=>decideSchedule('approved')}>موافقة</button><button type="button" className="btn btn-ghost btn-sm" onClick={()=>decideSchedule('rejected')}>رفض</button></div>}</div>)}</div>}
+      <p className="small muted">هذه مواعيد داخلية فقط. لا يوجد ربط اجتماعي نشط في هذه المرحلة ولا يتم نشر أي محتوى خارجياً.</p>
+    </section>}
     <p className="small muted"><Link to="/app">العودة إلى لوحة التحكم</Link></p>
   </div>;
 }
