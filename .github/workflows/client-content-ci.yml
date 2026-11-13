@@ -5,6 +5,7 @@ on:
     branches:
       - feature/client-content-publishing-60day
       - feature/admin-notifications-telegram-whatsapp
+      - fix/lyd-usd-ai-wallet-readiness
   pull_request:
     branches:
       - appjet
