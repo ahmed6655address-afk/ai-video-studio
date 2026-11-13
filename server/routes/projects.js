@@ -1,5 +1,6 @@
 import express from 'express';
 import { canUseTool, getEntitlements, monthlyUsage } from '../entitlements.js';
+import { estimateGenerationCostCents, providerWalletSummary, reserveGenerationFunds, settleGenerationFunds } from '../finance.js';
 import {
   ProviderNotConnectedError,
   TOOL_DEFINITIONS,
@@ -81,50 +82,75 @@ export function projectsRouter(db) {
         });
       }
 
-      const now = new Date().toISOString();
       const cleanOptions = parseOptions(def, options);
-      const info = db
-        .prepare(
-          `INSERT INTO projects (user_id, tool, prompt, negative_prompt, options, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'pending_provider', ?, ?)`
-        )
-        .run(
-          req.user.id,
-          tool,
-          cleanPrompt,
-          negativePrompt ? String(negativePrompt).slice(0, MAX_PROMPT) : null,
-          JSON.stringify(cleanOptions),
-          now,
-          now
-        );
+      const adapter = createAdapter(tool);
+      if (!adapter.connected) {
+        return res.status(503).json({
+          error: 'PROVIDER_NOT_CONNECTED',
+          messageAr: 'المزوّد غير متصل. لم يتم إنشاء مشروع أو خصم أي حصة.',
+        });
+      }
+      const estimatedCostCents = estimateGenerationCostCents(tool, cleanOptions);
+      if (estimatedCostCents === null) {
+        return res.status(503).json({ error: 'COST_POLICY_MISSING', messageAr: 'لم يتم اعتماد تكلفة هذه الأداة بعد.' });
+      }
+      const walletBefore = providerWalletSummary(db);
+      if (walletBefore.availableCents < estimatedCostCents) {
+        return res.status(402).json({
+          error: 'INSUFFICIENT_PROVIDER_FUNDS',
+          messageAr: 'التوليد متوقف مؤقتًا حتى يتوفر رصيد يغطي تكلفته لدى مزوّد الخدمة.',
+          requiredCents: estimatedCostCents,
+          availableCents: walletBefore.availableCents,
+          currency: 'USD',
+        });
+      }
 
+      const now = new Date().toISOString();
+      const info = db.prepare(
+        `INSERT INTO projects (user_id, tool, prompt, negative_prompt, options, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending_provider', ?, ?)`
+      ).run(
+        req.user.id,
+        tool,
+        cleanPrompt,
+        negativePrompt ? String(negativePrompt).slice(0, MAX_PROMPT) : null,
+        JSON.stringify(cleanOptions),
+        now,
+        now
+      );
       const projectId = info.lastInsertRowid;
-      // The quota is consumed by the accepted request itself, not by a successful
-      // provider callback — otherwise limits could never be enforced while no
-      // provider is connected.
+      const reservation = reserveGenerationFunds(db, { projectId, tool, options: cleanOptions });
+      if (!reservation.allowed) {
+        db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+        return res.status(402).json({
+          error: reservation.code,
+          messageAr: 'الرصيد التشغيلي غير كافٍ. لم يتم إرسال الطلب ولم تُخصم حصتك.',
+          requiredCents: reservation.amountCents,
+          availableCents: reservation.wallet?.availableCents ?? providerWalletSummary(db).availableCents,
+          currency: 'USD',
+        });
+      }
       db.prepare(
         "INSERT INTO usage_events (user_id, tool, project_id, kind, created_at) VALUES (?, ?, ?, 'generation', ?)"
       ).run(req.user.id, tool, projectId, now);
 
-      const adapter = createAdapter(tool);
-      let status = 'pending_provider';
-      let message = 'تم حفظ الطلب. هذه الأداة غير متصلة بمزوّد ذكاء اصطناعي بعد، لذلك لم يتم توليد فيديو.';
-
-      if (adapter.connected) {
-        try {
-          const result = await adapter.submit({ prompt: cleanPrompt, negativePrompt, options: cleanOptions, imageUrl });
-          db.prepare(
-            "UPDATE projects SET status = 'queued', provider = ?, provider_job_id = ?, updated_at = ? WHERE id = ?"
-          ).run(def.providerLabel, result.jobId, new Date().toISOString(), projectId);
-          status = 'queued';
-          message = 'تم إرسال الطلب إلى المزوّد.';
-        } catch (err) {
-          db.prepare(
-            "UPDATE projects SET status = 'failed', provider = ?, error_message = ?, updated_at = ? WHERE id = ?"
-          ).run(def.providerLabel, String(err.message).slice(0, 300), new Date().toISOString(), projectId);
-          status = 'failed';
-          message = 'تعذّر إرسال الطلب إلى المزوّد.';
-        }
+      let status = 'provider_review';
+      let message = 'تم حجز تكلفة تقديرية. نتحقق من قبول المزوّد للطلب.';
+      try {
+        const result = await adapter.submit({ prompt: cleanPrompt, negativePrompt, options: cleanOptions, imageUrl });
+        settleGenerationFunds(db, projectId);
+        db.prepare(
+          "UPDATE projects SET status = 'queued', provider = ?, provider_job_id = ?, updated_at = ? WHERE id = ?"
+        ).run(def.providerLabel, result.jobId, new Date().toISOString(), projectId);
+        status = 'queued';
+        message = 'قبل المزوّد الطلب وتم تسجيل تكلفته التقديرية.';
+      } catch (err) {
+        // Keep the reservation held: a network timeout can happen after the
+        // provider accepted the request. Admin must verify provider history before release.
+        db.prepare(
+          "UPDATE projects SET status = 'provider_review', provider = ?, error_message = ?, updated_at = ? WHERE id = ?"
+        ).run(def.providerLabel, String(err.message).slice(0, 300), new Date().toISOString(), projectId);
+        message = 'تعذر تأكيد قبول المزوّد. تم تعليق المبلغ المحجوز لحين المراجعة، ولم نحرره تلقائيًا.';
       }
 
       const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
