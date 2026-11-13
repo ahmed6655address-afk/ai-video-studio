@@ -542,3 +542,65 @@ test('owner identity comes from server env, never from a registrant password', a
     }
   });
 });
+
+test('fal.ai Wan text-to-video queue integration (mocked; no paid request)', async () => {
+  const previousKey = process.env.FAL_KEY;
+  const previousEnabled = process.env.FAL_ENABLE_GENERATION;
+  const previousOwnerCookie = state.ownerCookie;
+  const originalFetch = globalThis.fetch;
+  process.env.FAL_KEY = 'test-fal-key-not-real';
+  process.env.FAL_ENABLE_GENERATION = 'true';
+  const login = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+  });
+  assert.equal(login.status, 200);
+  state.ownerCookie = login.cookie;
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    if (!String(url).startsWith('https://queue.fal.run/')) return originalFetch(url, options);
+    calls.push({ url: String(url), method: options.method || 'GET', body: options.body });
+    if (String(url).endsWith('/status')) {
+      return new Response(JSON.stringify({ status: 'COMPLETED' }), { status: 200 });
+    }
+    if (options.method === 'POST') {
+      return new Response(JSON.stringify({ request_id: '019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b', status: 'IN_QUEUE' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ video: { url: 'https://cdn.example.test/generated-video.mp4' } }), { status: 200 });
+  };
+
+  try {
+    const created = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: {
+        tool: 'text_video',
+        prompt: 'مشهد تجريبي لاختبار توليد فيديو من النص',
+        negativePrompt: 'تشوهات',
+        options: { duration: '8s', aspect: '16:9' },
+      },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.providerConnected, true);
+    assert.equal(created.body.project.status, 'queued');
+    assert.equal(created.body.project.providerJobId, '019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6a7b');
+    assert.equal(calls[0].method, 'POST');
+    const submitted = JSON.parse(calls[0].body);
+    assert.equal(submitted.input.prompt, 'مشهد تجريبي لاختبار توليد فيديو من النص');
+    assert.equal(submitted.input.duration, 8);
+    assert.equal(submitted.input.resolution, '720p');
+
+    const detail = await api(`/api/projects/${created.body.project.id}`, { cookie: state.ownerCookie });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.project.status, 'completed');
+    assert.equal(detail.body.project.outputUrl, 'https://cdn.example.test/generated-video.mp4');
+    assert.equal(calls.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    state.ownerCookie = previousOwnerCookie;
+    if (previousKey === undefined) delete process.env.FAL_KEY;
+    else process.env.FAL_KEY = previousKey;
+    if (previousEnabled === undefined) delete process.env.FAL_ENABLE_GENERATION;
+    else process.env.FAL_ENABLE_GENERATION = previousEnabled;
+  }
+});

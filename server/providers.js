@@ -1,15 +1,9 @@
 /**
- * Server-only AI provider integration points.
+ * Server-only AI provider integrations.
  *
- * NOTHING in this file is a working AI integration yet. It provides:
- *   - a single registry describing every tool and the provider that will serve it
- *   - detection of server-side credentials (env vars only — never sent to clients)
- *   - a uniform adapter contract (`submit`, `fetchStatus`) so a real provider can be
- *     dropped in later without touching routes or UI
- *   - explicit `not_connected` state so the UI can honestly tell the user
- *
- * Credentials are read exclusively from `process.env` inside the server process.
- * No key, endpoint or provider secret is ever included in an API response.
+ * fal.ai Wan 2.7 text-to-video uses the official queue API. Generation is
+ * deliberately opt-in: both FAL_KEY and FAL_ENABLE_GENERATION=true are required.
+ * Credentials are read only by the server and are never returned to clients.
  */
 
 export const TOOL_DEFINITIONS = {
@@ -21,9 +15,9 @@ export const TOOL_DEFINITIONS = {
     icon: 'video',
     accent: 'violet',
     limitKey: 'limit_text_video',
-    providerEnvKey: 'TEXT_VIDEO_API_KEY',
-    endpointEnvKey: 'TEXT_VIDEO_API_URL',
-    providerLabel: 'Text-to-Video Provider',
+    providerEnvKey: 'FAL_KEY',
+    endpointEnvKey: 'FAL_ENABLE_GENERATION',
+    providerLabel: 'fal.ai — Wan 2.7',
     placeholderAr: 'مثال: مشهد سينمائي لمدينة عربية قديمة عند الغروب، أزقة حجرية، أضواء ذهبية، حركة كاميرا بطيئة للأمام…',
     promptLabelAr: 'وصف المشهد',
     options: [
@@ -93,6 +87,8 @@ export const TOOL_DEFINITIONS = {
 };
 
 export const TOOL_IDS = Object.keys(TOOL_DEFINITIONS);
+const FAL_MODEL = 'fal-ai/wan/v2.7/text-to-video';
+const FAL_QUEUE = 'https://queue.fal.run/fal-ai/wan/v2.7/text-to-video';
 
 export class ProviderNotConnectedError extends Error {
   constructor(tool) {
@@ -109,19 +105,80 @@ function envValue(name) {
   return trimmed.length >= 8 ? trimmed : null;
 }
 
-/**
- * A provider adapter is intentionally NOT implemented here.
- * When real credentials exist, `createAdapter` returns an adapter whose `submit`
- * performs a server-side request to the configured endpoint. Until then the tool
- * reports `connected: false` and every generation request is stored as
- * `pending_provider` instead of pretending a video was produced.
- */
+function falEnabled() {
+  return Boolean(envValue('FAL_KEY') && process.env.FAL_ENABLE_GENERATION === 'true');
+}
+
+async function falRequest(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      authorization: `Key ${envValue('FAL_KEY')}`,
+      ...(options.headers || {}),
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(`fal.ai responded with ${response.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`);
+  }
+  return response.json();
+}
+
+function falAdapter() {
+  return {
+    tool: 'text_video',
+    get connected() {
+      return falEnabled();
+    },
+    async submit(payload) {
+      if (!falEnabled()) throw new ProviderNotConnectedError('text_video');
+      const duration = Number.parseInt(String(payload.options?.duration || '8s'), 10);
+      const aspect = payload.options?.aspect || '16:9';
+      const input = {
+        prompt: payload.prompt,
+        aspect_ratio: ['16:9', '9:16', '1:1'].includes(aspect) ? aspect : '16:9',
+        duration: Number.isInteger(duration) ? Math.min(15, Math.max(2, duration)) : 8,
+        resolution: '720p',
+        enable_prompt_expansion: true,
+        enable_safety_checker: true,
+      };
+      if (payload.negativePrompt) input.negative_prompt = String(payload.negativePrompt).slice(0, 500);
+      const data = await falRequest(FAL_QUEUE, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input }),
+      });
+      if (!data.request_id) throw new Error('fal.ai did not return a request_id');
+      return { jobId: data.request_id, raw: { status: data.status || 'IN_QUEUE' } };
+    },
+    async fetchStatus(jobId) {
+      if (!falEnabled()) throw new ProviderNotConnectedError('text_video');
+      if (!/^[0-9a-f-]{20,}$/i.test(String(jobId))) throw new Error('Invalid fal.ai request ID');
+      const base = `${FAL_QUEUE}/requests/${encodeURIComponent(jobId)}`;
+      const status = await falRequest(`${base}/status`, { method: 'GET' });
+      if (status.status !== 'COMPLETED') return { status: status.status, outputUrl: null };
+      if (status.error || status.error_type) {
+        return { status: 'FAILED', error: String(status.error || status.error_type).slice(0, 300) };
+      }
+      const result = await falRequest(base, { method: 'GET' });
+      const outputUrl = result.video?.url || result.output?.video?.url || null;
+      if (!outputUrl || !/^https:\/\//i.test(outputUrl)) {
+        return { status: 'FAILED', error: 'fal.ai completed without a valid video URL.' };
+      }
+      return { status: 'COMPLETED', outputUrl };
+    },
+  };
+}
+
+/** Provider adapters are server-only. Only text-to-video is implemented currently. */
 export function createAdapter(tool) {
   const def = TOOL_DEFINITIONS[tool];
   if (!def) throw new Error(`Unknown tool: ${tool}`);
+  if (tool === 'text_video') return falAdapter();
+
   const apiKey = envValue(def.providerEnvKey);
   const endpoint = envValue(def.endpointEnvKey);
-
   return {
     tool,
     get connected() {
@@ -129,13 +186,9 @@ export function createAdapter(tool) {
     },
     async submit(payload) {
       if (!apiKey || !endpoint) throw new ProviderNotConnectedError(tool);
-      // Scaffold for a future provider: server-side call only, key never leaves the server.
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-        },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({ tool, ...payload }),
         signal: AbortSignal.timeout(20_000),
       });
@@ -155,7 +208,7 @@ export function createAdapter(tool) {
   };
 }
 
-/** Public-safe status payload: booleans and display names only, never env values. */
+/** Public-safe status; configured credentials are not proof of a successful live call. */
 export function providerStatus() {
   const tools = {};
   for (const tool of TOOL_IDS) {
@@ -166,16 +219,19 @@ export function providerStatus() {
       connected: adapter.connected,
       providerLabel: def.providerLabel,
       requiredEnv: [def.providerEnvKey, def.endpointEnvKey],
-      configuredEnv: [def.providerEnvKey, def.endpointEnvKey].filter((name) => Boolean(envValue(name))),
+      configuredEnv: tool === 'text_video'
+        ? ['FAL_KEY', 'FAL_ENABLE_GENERATION'].filter((name) => name === 'FAL_ENABLE_GENERATION'
+          ? process.env.FAL_ENABLE_GENERATION === 'true'
+          : Boolean(envValue(name)))
+        : [def.providerEnvKey, def.endpointEnvKey].filter((name) => Boolean(envValue(name))),
       messageAr: adapter.connected
-        ? 'المزوّد مُهيّأ على الخادم — التنفيذ الفعلي غير مُتحقَّق منه في هذه النسخة.'
-        : 'هذه الأداة غير متصلة بمزوّد ذكاء اصطناعي بعد. الواجهة جاهزة، والطلبات تُحفظ للمراجعة.',
+        ? 'إعدادات المزوّد مكتملة على الخادم؛ يلزم اختبار طلب فعلي لتأكيد التشغيل.'
+        : 'هذه الأداة غير متصلة بمزوّد ذكاء اصطناعي بعد.',
     };
   }
   return { tools };
 }
 
-/** Tool catalogue safe to send to the browser (no env names, no secrets). */
 export function publicTools(status = providerStatus()) {
   return TOOL_IDS.map((tool) => {
     const def = TOOL_DEFINITIONS[tool];
