@@ -11,7 +11,7 @@ import {
   initials,
   useToast,
 } from '../components/ui.jsx';
-import { auth, studio } from '../api.js';
+import { auth, studio, wallet } from '../api.js';
 import { normalizeEntitlements, useSession } from '../session.jsx';
 
 const COLORS = ['violet', 'cyan', 'amber', 'rose', 'emerald', 'gold'];
@@ -34,6 +34,10 @@ export default function Profile() {
 
   const [usage, setUsage] = useState(null);
   const [loadingUsage, setLoadingUsage] = useState(true);
+  const [walletData, setWalletData] = useState(null);
+  const [loadingWallet, setLoadingWallet] = useState(true);
+  const [transferForm, setTransferForm] = useState({ currency: 'LYD', amount: '', paymentReference: '', note: '' });
+  const [sendingTransfer, setSendingTransfer] = useState(false);
 
   useEffect(() => {
     setName(user?.name || '');
@@ -46,6 +50,22 @@ export default function Profile() {
       .then((data) => setUsage(data.entitlements))
       .catch(() => {})
       .finally(() => setLoadingUsage(false));
+  }, []);
+
+  async function loadWallet() {
+    setLoadingWallet(true);
+    try {
+      const data = await wallet.summary();
+      setWalletData(data);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setLoadingWallet(false);
+    }
+  }
+
+  useEffect(() => {
+    loadWallet();
   }, []);
 
   const ent = normalizeEntitlements(usage || entitlements, user);
@@ -89,6 +109,26 @@ export default function Profile() {
       toast.push(err.message, 'error');
     } finally {
       setSavingPassword(false);
+    }
+  }
+
+  async function submitTransfer(event) {
+    event.preventDefault();
+    setSendingTransfer(true);
+    try {
+      await wallet.requestTransfer({
+        currency: transferForm.currency,
+        amount: transferForm.amount,
+        paymentReference: transferForm.paymentReference.trim(),
+        note: transferForm.note.trim(),
+      });
+      setTransferForm((prev) => ({ ...prev, amount: '', paymentReference: '', note: '' }));
+      toast.push('تم تسجيل طلب التحويل. سيبقى الرصيد دون تغيير حتى تراجعه الإدارة.', 'success');
+      await loadWallet();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setSendingTransfer(false);
     }
   }
 
@@ -213,10 +253,15 @@ export default function Profile() {
               <hr className="divider" />
               <h3 style={{ fontSize: '0.95rem' }}>ترقية الخطة</h3>
               <ul className="plan-mini">
-                {plans.filter((plan) => plan.priceSar > 0).map((plan) => (
+                {plans.filter((plan) => plan.prices?.LYD != null || plan.prices?.USD != null).map((plan) => (
                   <li key={plan.code}>
                     <span>{plan.nameAr}</span>
-                    <span className="muted small">{formatNumber(plan.priceSar)} ر.س · {plan.taglineAr}</span>
+                    <span className="muted small">
+                      {plan.prices?.LYD != null ? `${formatNumber(plan.prices.LYD)} د.ل` : ''}
+                      {plan.prices?.LYD != null && plan.prices?.USD != null ? ' · ' : ''}
+                      {plan.prices?.USD != null ? `${formatNumber(plan.prices.USD)} USD` : ''}
+                      {' · '}{plan.taglineAr}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -232,6 +277,90 @@ export default function Profile() {
               </Link>
             </>
           )}
+        </section>
+
+        <section className="card card-pad">
+          <div className="row-between" style={{ marginBottom: 12 }}>
+            <h2 className="section-title" style={{ margin: 0, fontSize: '1.05rem' }}>
+              <Icon name="wallet" size={17} /> محفظة رصيد الاستخدام
+            </h2>
+            {loadingWallet && <Spinner size={14} />}
+          </div>
+          <div className="access-pill on">
+            <Icon name="coins" size={16} />
+            <span>رصيدك الحالي: {formatNumber(walletData?.wallet?.balance ?? 0)} نقطة استخدام</span>
+          </div>
+          <p className="small muted" style={{ marginTop: 10 }}>
+            هذه نقاط استخدام داخل المنصة وليست أموالاً قابلة للسحب أو التحويل. اختر العملة التي حولت بها فعلياً، ثم أرسل مرجع الحوالة للمراجعة.
+          </p>
+          <form onSubmit={submitTransfer}>
+            <div className="form-grid">
+              <Field label="عملة التحويل" htmlFor="walletCurrency" required>
+                <select
+                  id="walletCurrency"
+                  className="input"
+                  value={transferForm.currency}
+                  onChange={(event) => setTransferForm((prev) => ({ ...prev, currency: event.target.value }))}
+                >
+                  <option value="LYD">الدينار الليبي (LYD)</option>
+                  <option value="USD">الدولار الأمريكي (USD)</option>
+                </select>
+              </Field>
+              <Field label="المبلغ المحوّل" htmlFor="walletAmount" required>
+                <input
+                  id="walletAmount"
+                  className="input"
+                  type="number"
+                  min="0.001"
+                  step={transferForm.currency === 'LYD' ? '0.001' : '0.01'}
+                  value={transferForm.amount}
+                  onChange={(event) => setTransferForm((prev) => ({ ...prev, amount: event.target.value }))}
+                  placeholder={transferForm.currency === 'LYD' ? 'مثال: 25.500' : 'Example: 10.00'}
+                  required
+                />
+              </Field>
+            </div>
+            <Field label="مرجع الحوالة" htmlFor="walletReference" hint="أدخله كما يظهر في إيصال التحويل." required>
+              <input
+                id="walletReference"
+                className="input"
+                value={transferForm.paymentReference}
+                onChange={(event) => setTransferForm((prev) => ({ ...prev, paymentReference: event.target.value }))}
+                minLength={4}
+                maxLength={100}
+                required
+              />
+            </Field>
+            <Field label="ملاحظة (اختيارية)" htmlFor="walletNote">
+              <input
+                id="walletNote"
+                className="input"
+                value={transferForm.note}
+                onChange={(event) => setTransferForm((prev) => ({ ...prev, note: event.target.value }))}
+                maxLength={500}
+              />
+            </Field>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={sendingTransfer}>
+              {sendingTransfer ? <Spinner size={15} /> : <Icon name="send" size={15} />} إرسال طلب مراجعة التحويل
+            </button>
+          </form>
+          <div className="alert alert-info" style={{ marginTop: 12 }}>
+            <Icon name="info" size={15} />
+            <span>لا تضف طلباً قبل تنفيذ التحويل إلى بيانات الدفع التي زودتك بها الإدارة. لا يضاف أي رصيد تلقائياً؛ تحدد الإدارة نقاط الاستخدام بعد التحقق.</span>
+          </div>
+          <h3 style={{ fontSize: '0.95rem', marginTop: 18 }}>طلبات التحويل الأخيرة</h3>
+          {walletData?.paymentRequests?.length ? (
+            <ul className="plan-mini">
+              {walletData.paymentRequests.slice(0, 5).map((item) => (
+                <li key={item.id}>
+                  <span>{item.currency === 'LYD' ? 'دينار ليبي' : 'دولار أمريكي'} · {formatNumber(item.amount)} · {item.paymentReference}</span>
+                  <span className={`badge ${item.status === 'approved' ? 'badge-success' : item.status === 'rejected' ? 'badge-danger' : 'badge-warning'}`}>
+                    {item.status === 'approved' ? 'معتمد' : item.status === 'rejected' ? 'مرفوض' : 'قيد المراجعة'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="small faint">لا توجد طلبات تحويل بعد.</p>}
         </section>
 
         <section className="card card-pad">
