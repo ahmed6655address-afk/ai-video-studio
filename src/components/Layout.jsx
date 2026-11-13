@@ -143,6 +143,10 @@ export default function Layout({ children }) {
           <Icon name="history" size={20} />
           <span>السجل</span>
         </NavLink>
+        <NavLink to="/app/client-content" className={linkClass}>
+          <Icon name="calendar" size={20} />
+          <span>محتوى العملاء</span>
+        </NavLink>
         <NavLink to="/app/profile" className={linkClass}>
           <Icon name="user" size={20} />
           <span>حسابي</span>
