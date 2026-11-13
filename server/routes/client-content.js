@@ -45,17 +45,32 @@ export function clientContentRouter(db) {
     if(title.length<3||title.length>100||!['custom','suggested'].includes(mode)||brief.length>4000||language.length>16||dialect.length>60||!allowedMusic.includes(musicChoice))
       return res.status(400).json({error:'VALIDATION_ERROR',messageAr:'راجع عنوان المشروع وطريقة الإنشاء والإعدادات.'});
     const ideaId=body.ideaId==null?null:Number(body.ideaId);
-    if(mode==='suggested' && (!Number.isInteger(ideaId)||!db.prepare('SELECT id FROM client_content_ideas WHERE id=? AND is_active=1').get(ideaId)))
+    const selectedIdea = mode==='suggested' && Number.isInteger(ideaId)
+      ? db.prepare('SELECT id,category FROM client_content_ideas WHERE id=? AND is_active=1').get(ideaId)
+      : null;
+    if(mode==='suggested' && !selectedIdea)
       return res.status(400).json({error:'INVALID_IDEA',messageAr:'الفكرة المختارة غير متاحة.'});
+    if(mode==='suggested' && body.category && body.category !== selectedIdea.category)
+      return res.status(400).json({error:'IDEA_CATEGORY_MISMATCH',messageAr:'التصنيف لا يطابق الفكرة المختارة.'});
+    const projectCategory = selectedIdea?.category || (body.category && CATEGORIES.includes(body.category) ? body.category : null);
+    if(body.category && !projectCategory)
+      return res.status(400).json({error:'INVALID_CATEGORY',messageAr:'التصنيف المختار غير متاح.'});
+    if(musicChoice==='client_upload' && String(body.musicRightsNote||'').trim().length<10)
+      return res.status(400).json({error:'MUSIC_RIGHTS_REQUIRED',messageAr:'يرجى تأكيد امتلاك حقوق استخدام الملف الموسيقي.'});
+    const voiceProfile = body.voiceProfile && typeof body.voiceProfile==='object' && !Array.isArray(body.voiceProfile) ? body.voiceProfile : {};
+    if(JSON.stringify(voiceProfile).length>3000)
+      return res.status(400).json({error:'VOICE_PROFILE_TOO_LARGE'});
     if(mode==='custom' && brief.length<10) return res.status(400).json({error:'BRIEF_REQUIRED',messageAr:'اكتب وصفاً للفكرة لا يقل عن 10 أحرف.'});
     const now=new Date().toISOString();
     const tx=db.transaction(()=>{
       const info=db.prepare(`INSERT INTO client_content_projects(user_id,title,creation_mode,category,idea_id,brief,language,dialect,voice_profile,music_choice,music_rights_note,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id,title,mode,body.category?String(body.category).slice(0,80):null,ideaId,brief,language,dialect,
-          JSON.stringify(body.voiceProfile&&typeof body.voiceProfile==='object'?body.voiceProfile:{}),musicChoice,String(body.musicRightsNote||'').slice(0,500),now,now);
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(req.user.id,title,mode,projectCategory,ideaId,brief,language,dialect,
+          JSON.stringify(voiceProfile),musicChoice,String(body.musicRightsNote||'').slice(0,500),now,now);
       const projectId=Number(info.lastInsertRowid);
       const calendarInsert=db.prepare('INSERT INTO client_content_calendar_days(project_id,user_id,day_number,planned_date,created_at) VALUES(?,?,?,?,?)');
-      for(let day=0;day<60;day++) { const date=new Date(Date.now()+day*86400000); calendarInsert.run(projectId,req.user.id,day+1,date.toISOString().slice(0,10),now); }
+      const calendarStart = new Date(now);
+      calendarStart.setUTCHours(0,0,0,0);
+      for(let day=0;day<60;day++) { const date=new Date(calendarStart); date.setUTCDate(calendarStart.getUTCDate()+day); calendarInsert.run(projectId,req.user.id,day+1,date.toISOString().slice(0,10),now); }
       const episodes=Array.isArray(body.episodes)?body.episodes.slice(0,120):[];
       const insertEpisode=db.prepare('INSERT INTO client_content_episodes(project_id,user_id,episode_number,title,planned_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?)');
       episodes.forEach((ep,i)=>insertEpisode.run(projectId,req.user.id,i+1,String(ep.title||'').slice(0,120),ep.plannedDate?String(ep.plannedDate).slice(0,30):null,now,now));
