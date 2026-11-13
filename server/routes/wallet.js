@@ -53,7 +53,7 @@ export function walletRouter(db) {
   router.post('/payment-requests', (req, res) => {
     const currency = String(req.body?.currency || '').toUpperCase();
     const amountMinor = parseAmountMinor(req.body?.amount, currency);
-    const paymentReference = String(req.body?.paymentReference || '').trim().slice(0, 100);
+    const paymentReference = String(req.body?.paymentReference || '').trim().toUpperCase().slice(0, 100);
     const customerNote = String(req.body?.note || '').trim().slice(0, 500) || null;
 
     if (!amountMinor || paymentReference.length < 4) {
@@ -65,18 +65,26 @@ export function walletRouter(db) {
 
     try {
       const now = new Date().toISOString();
-      const result = db.prepare(
-        `INSERT INTO wallet_payment_requests (user_id, currency, amount_minor, payment_reference, customer_note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(req.user.id, currency, amountMinor, paymentReference, customerNote, now);
-      const row = db.prepare('SELECT * FROM wallet_payment_requests WHERE id = ?').get(result.lastInsertRowid);
+      const tx = db.transaction(() => {
+        const result = db.prepare(
+          `INSERT INTO wallet_payment_requests (user_id, currency, amount_minor, payment_reference, customer_note, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(req.user.id, currency, amountMinor, paymentReference, customerNote, now);
+        db.prepare(
+          `INSERT INTO payment_reference_registry (payment_reference, source_type, source_id, user_id, created_at)
+           VALUES (?, 'wallet_topup', ?, ?, ?)`
+        ).run(paymentReference, Number(result.lastInsertRowid), req.user.id, now);
+        return Number(result.lastInsertRowid);
+      });
+      const requestId = tx();
+      const row = db.prepare('SELECT * FROM wallet_payment_requests WHERE id = ?').get(requestId);
       return res.status(201).json({
         paymentRequest: serializePayment(row),
         messageAr: 'تم تسجيل طلب مراجعة الحوالة. لن يُضاف أي رصيد قبل تحقق الإدارة واعتماد عدد نقاط الاستخدام.',
       });
     } catch (error) {
       if (String(error?.code || '').includes('CONSTRAINT')) {
-        return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الحوالة مسجل مسبقًا.' });
+        return res.status(409).json({ error: 'PAYMENT_REFERENCE_USED', messageAr: 'مرجع الحوالة مسجل مسبقًا ولا يمكن استخدامه في عملية أخرى.' });
       }
       throw error;
     }
