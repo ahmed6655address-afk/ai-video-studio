@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - feature/client-content-publishing-60day
+      - feature/telegram-owner-notifications
   pull_request:
     branches:
       - appjet
+      - feature/admin-notifications-telegram-whatsapp
 
 permissions:
   contents: read
