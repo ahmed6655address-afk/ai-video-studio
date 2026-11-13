@@ -559,6 +559,26 @@ test('client content publishing workspace is isolated and subscription-gated', a
     assert.equal(create.body.error, 'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED');
   });
 
+  await t.test('only the owner can activate a manually verified content subscription', async () => {
+    const me = await api('/api/auth/me', { cookie: state.user2Cookie });
+    const denied = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001' },
+    });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'FORBIDDEN');
+
+    const activated = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001' },
+    });
+    assert.equal(activated.status, 201);
+    const access = await api('/api/client-content', { cookie: state.user2Cookie });
+    assert.equal(access.body.serviceAccess, true);
+  });
+
   await t.test('owner can create a private project and its episode', async () => {
     const create = await api('/api/client-content/projects', {
       method: 'POST',
