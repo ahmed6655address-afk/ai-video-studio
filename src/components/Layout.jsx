@@ -49,6 +49,7 @@ export default function Layout({ children }) {
   const navItems = [
     { to: '/app', label: 'لوحة التحكم', icon: 'grid', end: true },
     { to: '/app/history', label: 'سجل الفيديوهات', icon: 'history' },
+    { to: '/app/client-content', label: 'إدارة محتوى العملاء', icon: 'calendar' },
     { to: '/app/profile', label: 'ملفي الشخصي', icon: 'user' },
   ];
   if (entitlements?.isStaff) {
