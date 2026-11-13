@@ -629,12 +629,25 @@ test('client content publishing workspace is isolated and subscription-gated', a
     const projectId = list.body.projects[0].id;
     const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
     const episodeId = detail.body.episodes[0].id;
+    const scheduledAt = new Date(Date.now() + 2 * 86400000).toISOString();
+    const proposed = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'youtube', scheduledAt },
+    });
+    assert.equal(proposed.status, 201);
+    assert.equal(proposed.body.schedule.status, 'awaiting_approval');
+
     const approval = await api('/api/client-content/projects/' + projectId + '/approvals', {
       method: 'POST',
       cookie: state.ownerCookie,
-      body: { episodeId, approvalType: 'script', decision: 'approved', scope: { revision: 1 } },
+      body: { episodeId, approvalType: 'schedule', decision: 'approved', scope: { revision: 1 } },
     });
     assert.equal(approval.status, 201);
     assert.match(approval.body.messageAr, /لا ينفذ/);
+    const afterApproval = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(afterApproval.body.schedule[0].status, 'approved');
+    assert.equal(afterApproval.body.schedule[0].platform, 'youtube');
+    assert.equal(afterApproval.body.schedule[0].external_post_id, undefined);
   });
 });
