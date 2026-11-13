@@ -81,6 +81,28 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_events(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS provider_wallet_ledger (
+  id TEXT PRIMARY KEY,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents != 0),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('credit', 'debit')),
+  reference TEXT NOT NULL UNIQUE,
+  note TEXT NOT NULL DEFAULT '',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_wallet_ledger_created ON provider_wallet_ledger(created_at);
+
+CREATE TABLE IF NOT EXISTS provider_wallet_reservations (
+  project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  status TEXT NOT NULL CHECK (status IN ('reserved', 'charged', 'released')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  release_reason TEXT,
+  released_by INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_provider_wallet_reservations_status ON provider_wallet_reservations(status);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
