@@ -32,7 +32,7 @@ export function activeSubscription(db, userId, now = new Date()) {
   return (
     db
       .prepare(
-        `SELECT s.*, p.name_ar, p.price_sar
+        `SELECT s.*, p.name_ar, p.price_lyd_minor, p.price_usd_minor
          FROM subscriptions s JOIN plans p ON p.code = s.plan_code
          WHERE s.user_id = ? AND s.status = 'active' AND s.expires_at > ?
          ORDER BY s.expires_at DESC LIMIT 1`
@@ -88,7 +88,7 @@ export function getEntitlements(db, user, now = new Date()) {
     remaining[tool] = limit === null ? null : Math.max(0, limit - usage[tool]);
   }
 
-  const hasAccess = isStaff || Boolean(subscription && plan && plan.price_sar >= 0);
+  const hasAccess = isStaff || Boolean(subscription && plan);
   let reason = null;
   if (!hasAccess) reason = subscription ? 'SUBSCRIPTION_INACTIVE' : 'SUBSCRIPTION_REQUIRED';
 
@@ -101,7 +101,10 @@ export function getEntitlements(db, user, now = new Date()) {
       ? {
           code: plan.code,
           nameAr: plan.name_ar,
-          priceSar: plan.price_sar,
+          prices: {
+            LYD: plan.price_lyd_minor === null ? null : plan.price_lyd_minor / 1000,
+            USD: plan.price_usd_minor === null ? null : plan.price_usd_minor / 100,
+          },
           limits: {
             text_video: plan.limit_text_video,
             image_video: plan.limit_image_video,
