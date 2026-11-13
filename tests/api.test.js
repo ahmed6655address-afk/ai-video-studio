@@ -268,10 +268,9 @@ test('owner has free unlimited access and full admin rights', async (t) => {
         options: { aspect: '9:16', duration: '15' },
       },
     });
-    assert.equal(res.status, 201);
-    assert.equal(res.body.project.status, 'pending_provider');
-    assert.equal(res.body.providerConnected, false);
-    assert.match(res.body.messageAr, /غير متصلة|لم يتم توليد/);
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error, 'PROVIDER_NOT_CONNECTED');
+    assert.match(res.body.messageAr, /لم يتم إنشاء مشروع|لم يتم/);
   });
 
   await t.test('admin API cannot grant the owner role or promote oneself', async () => {
@@ -365,25 +364,17 @@ test('granting a subscription unlocks generation within plan limits', async (t) 
       cookie: state.userCookie,
       body: { tool: 'voice', prompt: 'تعليق صوتي عربي دافئ لفقرة تعريفية عن الشركة' },
     });
-    assert.equal(res.status, 201);
-    assert.equal(res.body.project.tool, 'voice');
-    assert.equal(res.body.project.status, 'pending_provider');
-    assert.equal(res.body.providerConnected, false);
-
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error, 'PROVIDER_NOT_CONNECTED');
     const list = await api('/api/projects', { cookie: state.userCookie });
     assert.equal(list.status, 200);
-    assert.equal(list.body.total, 1);
-    assert.equal(list.body.projects[0].tool, 'voice');
-
-    const detail = await api(`/api/projects/${res.body.project.id}`, { cookie: state.userCookie });
-    assert.equal(detail.status, 200);
-    assert.equal(detail.body.project.id, res.body.project.id);
+    assert.equal(list.body.total, 0);
   });
 
   await t.test('usage endpoint reflects the month', async () => {
     const res = await api('/api/usage', { cookie: state.userCookie });
     assert.equal(res.status, 200);
-    assert.equal(res.body.usage.voice, 1);
+    assert.equal(res.body.usage.voice, 0);
     assert.equal(res.body.entitlements.limits.voice, 20);
   });
 
@@ -396,12 +387,11 @@ test('granting a subscription unlocks generation within plan limits', async (t) 
     assert.equal(patch.status, 200);
     assert.equal(patch.body.entitlements.limits.text_video, 1);
 
-    const first = await api('/api/projects', {
-      method: 'POST',
-      cookie: state.userCookie,
-      body: { tool: 'text_video', prompt: 'مقدمة برنامج وثائقي عن الصحراء العربية' },
-    });
-    assert.equal(first.status, 201);
+    // Simulate one already-consumed generation so this test isolates quota
+    // enforcement without requiring an external provider or a paid wallet balance.
+    app.locals.db.prepare(
+      "INSERT INTO usage_events (user_id, tool, project_id, kind, created_at) VALUES (?, 'text_video', NULL, 'generation', ?)"
+    ).run(state.userId, new Date().toISOString());
 
     const second = await api('/api/projects', {
       method: 'POST',
@@ -420,9 +410,11 @@ test('granting a subscription unlocks generation within plan limits', async (t) 
     assert.equal(other.status, 201);
     state.user2Cookie = other.cookie;
 
-    const list = await api('/api/projects', { cookie: state.userCookie });
-    const projectId = list.body.projects[0].id;
-    const forbidden = await api(`/api/projects/${projectId}`, { cookie: state.user2Cookie });
+    const now = new Date().toISOString();
+    const project = app.locals.db.prepare(
+      "INSERT INTO projects (user_id, tool, prompt, options, status, created_at, updated_at) VALUES (?, 'text_video', 'مشروع اختبار صلاحيات', '{}', 'pending_provider', ?, ?)"
+    ).run(state.userId, now, now);
+    const forbidden = await api(`/api/projects/${project.lastInsertRowid}`, { cookie: state.user2Cookie });
     assert.equal(forbidden.status, 403);
   });
 
@@ -570,6 +562,14 @@ test('fal.ai Wan text-to-video queue integration (mocked; no paid request)', asy
   };
 
   try {
+    const funded = await api('/api/admin/finance/credits', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { amountCents: 10000, reference: 'TEST-FAL-TOPUP-001', note: 'Mocked test wallet', providerBalanceVerified: true },
+    });
+    assert.equal(funded.status, 201);
+    assert.equal(funded.body.wallet.availableCents, 10000);
+
     const created = await api('/api/projects', {
       method: 'POST',
       cookie: state.ownerCookie,
