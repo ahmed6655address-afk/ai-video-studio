@@ -43,6 +43,11 @@ export const auth = {
   changePassword: (payload) => api('/auth/me/password', { method: 'POST', body: payload }),
 };
 
+export const wallet = {
+  summary: () => api('/wallet'),
+  requestTransfer: (payload) => api('/wallet/payment-requests', { method: 'POST', body: payload }),
+};
+
 export const studio = {
   dashboard: () => api('/dashboard'),
   tools: () => api('/tools'),
@@ -61,4 +66,7 @@ export const admin = {
   cancelSubscription: (id) => api(`/admin/users/${id}/subscription`, { method: 'DELETE' }),
   plans: () => api('/admin/plans'),
   updatePlan: (code, payload) => api(`/admin/plans/${code}`, { method: 'PATCH', body: payload }),
+  payments: (status = 'pending') => api(`/admin/payments?status=${encodeURIComponent(status)}`),
+  approvePayment: (id, payload) => api(`/admin/payments/${id}/approve`, { method: 'POST', body: payload }),
+  rejectPayment: (id, payload) => api(`/admin/payments/${id}/reject`, { method: 'POST', body: payload }),
 };
