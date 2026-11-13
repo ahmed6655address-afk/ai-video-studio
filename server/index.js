@@ -8,6 +8,7 @@ import { adminRouter, publicPlansRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { projectsRouter } from './routes/projects.js';
 import { clientContentRouter } from './routes/client-content.js';
+import { walletRouter } from './routes/wallet.js';
 import { configureTelegramWebhook, telegramWebhookHandler } from './telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -97,6 +98,7 @@ export function createApp(options = {}) {
   // operational information that an unauthenticated caller has no need for.
   api.get('/health', (req, res) => res.json({ status: 'ok' }));
   api.use('/auth', authRouter(db));
+  api.use('/wallet', walletRouter(db));
   api.use(publicPlansRouter(db));
   api.use(projectsRouter(db));
   api.use(clientContentRouter(db));
