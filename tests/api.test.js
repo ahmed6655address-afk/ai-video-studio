@@ -562,6 +562,14 @@ test('fal.ai Wan text-to-video queue integration (mocked; no paid request)', asy
   };
 
   try {
+    const unfunded = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { tool: 'text_video', prompt: 'اختبار منع التوليد عند عدم وجود رصيد' },
+    });
+    assert.equal(unfunded.status, 402);
+    assert.equal(unfunded.body.error, 'INSUFFICIENT_PROVIDER_FUNDS');
+
     const funded = await api('/api/admin/finance/credits', {
       method: 'POST',
       cookie: state.ownerCookie,
