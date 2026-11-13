@@ -646,7 +646,13 @@ export default function Admin() {
                   </div>
                   <p className="muted small" style={{ margin: '4px 0 10px' }}>{plan.taglineAr}</p>
                   <p className="plan-price">
-                    {plan.priceSar > 0 ? `${formatNumber(plan.priceSar)} ر.س` : 'مجاني'}
+                    {plan.code === 'free' ? 'مجاني' : (
+                      <>
+                        {plan.prices?.LYD != null ? `${formatNumber(plan.prices.LYD)} د.ل` : 'غير محدد بالدينار'}
+                        <span className="small faint"> · </span>
+                        {plan.prices?.USD != null ? `${formatNumber(plan.prices.USD)} USD` : 'غير محدد بالدولار'}
+                      </>
+                    )}
                     <span className="small faint"> / شهريًا</span>
                   </p>
                   <ul className="plan-limits">
@@ -672,8 +678,7 @@ export default function Admin() {
           <div className="alert alert-info" style={{ marginTop: 14 }}>
             <Icon name="alert" size={15} />
             <span>
-              الدفع الإلكتروني غير متصل. تفعيل الاشتراكات يتم يدويًا من تبويب المستخدمين بعد استلام
-              الدفعة، مع حفظ مرجع الدفع للمراجعة.
+              الدفع الآلي غير مفعّل. سجّل طلبات التحويل من تبويب «طلبات التحويل» وراجعها يدويًا، واضبط سعري كل خطة بالدينار الليبي والدولار بشكل مستقل.
             </span>
           </div>
         </section>
@@ -780,11 +785,11 @@ export default function Admin() {
               id="planCode"
               className="input select"
               value={subForm.planCode}
-              onChange={(event) => setSubForm((prev) => ({ ...prev, planCode: event.target.value }))}
+              onChange={(event) => changeSubPlan(event.target.value)}
             >
               {assignablePlans.map((plan) => (
                 <option key={plan.code} value={plan.code}>
-                  {plan.nameAr} — {formatNumber(plan.priceSar)} ر.س
+                  {plan.nameAr} — {plan.prices?.LYD != null ? `${formatNumber(plan.prices.LYD)} د.ل` : '—'} / {plan.prices?.USD != null ? `${formatNumber(plan.prices.USD)} USD` : '—'}
                 </option>
               ))}
             </select>
@@ -794,23 +799,68 @@ export default function Admin() {
               id="months"
               className="input select"
               value={subForm.months}
-              onChange={(event) => setSubForm((prev) => ({ ...prev, months: event.target.value }))}
+              onChange={(event) => {
+                const months = Number(event.target.value);
+                const plan = assignablePlans.find((item) => item.code === subForm.planCode);
+                const monthly = plan?.prices?.[subForm.currency];
+                setSubForm((prev) => ({ ...prev, months, amount: monthly == null ? '' : String(Number(monthly) * months) }));
+              }}
             >
               {MONTH_OPTIONS.map((months) => (
                 <option key={months} value={months}>{months} شهر</option>
               ))}
             </select>
           </Field>
-          <Field label="مرجع الدفع" htmlFor="paymentRef" hint="اختياري — رقم الحوالة أو رقم العملية.">
+          <Field label="عملة الدفع" htmlFor="subCurrency" required>
+            <select id="subCurrency" className="input select" value={subForm.currency} onChange={(event) => changeSubCurrency(event.target.value)}>
+              <option value="LYD">الدينار الليبي (LYD)</option>
+              <option value="USD">الدولار الأمريكي (USD)</option>
+            </select>
+          </Field>
+          <Field label="إجمالي المبلغ المدفوع" htmlFor="subAmount" hint="يجب أن يطابق سعر الخطة × عدد الأشهر." required>
+            <input
+              id="subAmount"
+              className="input"
+              type="number"
+              min="0.01"
+              step={subForm.currency === 'LYD' ? '0.001' : '0.01'}
+              value={subForm.amount}
+              onChange={(event) => setSubForm((prev) => ({ ...prev, amount: event.target.value }))}
+              required
+            />
+          </Field>
+          <Field label="مرجع الحوالة" htmlFor="paymentRef" required>
             <input
               id="paymentRef"
               className="input"
               value={subForm.paymentRef}
               onChange={(event) => setSubForm((prev) => ({ ...prev, paymentRef: event.target.value }))}
               placeholder="مثال: TRX-10293"
+              minLength="4"
+              maxLength="100"
+              required
             />
           </Field>
-          <p className="small faint">سيتم تفعيل الاشتراك فورًا وتُسجَّل العملية في سجل الاشتراكات.</p>
+          <Field label="ملاحظة التحقق" htmlFor="verificationNote" hint="اكتب كيف طابقت التحويل مع كشف الحساب أو الإيصال." required>
+            <input
+              id="verificationNote"
+              className="input"
+              value={subForm.verificationNote}
+              onChange={(event) => setSubForm((prev) => ({ ...prev, verificationNote: event.target.value }))}
+              minLength="8"
+              maxLength="500"
+              required
+            />
+          </Field>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={subForm.paymentVerified}
+              onChange={(event) => setSubForm((prev) => ({ ...prev, paymentVerified: event.target.checked }))}
+            />
+            <span>أؤكد أنني تحققت فعليًا من وصول المبلغ ومطابقة مرجع الحوالة.</span>
+          </label>
+          <p className="small faint">لن يتم التفعيل إلا بعد تأكيد المالك للتحقق اليدوي من الدفع.</p>
         </form>
       </Modal>
 
@@ -881,15 +931,26 @@ export default function Admin() {
                 onChange={(event) => setPlanDraft((prev) => ({ ...prev, taglineAr: event.target.value }))}
               />
             </Field>
-            <Field label="السعر الشهري (ر.س)" htmlFor="planPrice" required>
+            <Field label="السعر الشهري بالدينار الليبي (LYD)" htmlFor="planPriceLyd" hint="اتركه فارغًا إذا لم تعتمد سعرًا بهذه العملة.">
               <input
-                id="planPrice"
+                id="planPriceLyd"
                 className="input"
                 type="number"
                 min="0"
-                step="1"
-                value={planDraft.priceSar}
-                onChange={(event) => setPlanDraft((prev) => ({ ...prev, priceSar: event.target.value }))}
+                step="0.001"
+                value={planDraft.priceLyd}
+                onChange={(event) => setPlanDraft((prev) => ({ ...prev, priceLyd: event.target.value }))}
+              />
+            </Field>
+            <Field label="السعر الشهري بالدولار الأمريكي (USD)" htmlFor="planPriceUsd" hint="سعر مستقل؛ لا يتم تحويله تلقائيًا من الدينار.">
+              <input
+                id="planPriceUsd"
+                className="input"
+                type="number"
+                min="0"
+                step="0.01"
+                value={planDraft.priceUsd}
+                onChange={(event) => setPlanDraft((prev) => ({ ...prev, priceUsd: event.target.value }))}
               />
             </Field>
             {Object.keys(TOOL_LABELS).map((tool) => (
