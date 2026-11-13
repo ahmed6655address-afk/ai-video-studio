@@ -648,17 +648,26 @@ test('client content publishing workspace is isolated and subscription-gated', a
     });
     assert.equal(proposed.status, 201);
     assert.equal(proposed.body.schedule.status, 'awaiting_approval');
+    const secondProposal = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'instagram', scheduledAt: new Date(Date.now() + 3 * 86400000).toISOString() },
+    });
+    assert.equal(secondProposal.status, 201);
 
     const approval = await api('/api/client-content/projects/' + projectId + '/approvals', {
       method: 'POST',
       cookie: state.ownerCookie,
-      body: { episodeId, approvalType: 'schedule', decision: 'approved', scope: { revision: 1 } },
+      body: { episodeId, approvalType: 'schedule', decision: 'approved', scope: { scheduleId: proposed.body.schedule.id, revision: 1 } },
     });
     assert.equal(approval.status, 201);
     assert.match(approval.body.messageAr, /لا ينفذ/);
     const afterApproval = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
-    assert.equal(afterApproval.body.schedule[0].status, 'approved');
-    assert.equal(afterApproval.body.schedule[0].platform, 'youtube');
-    assert.equal(afterApproval.body.schedule[0].external_post_id, undefined);
+    const approvedItem = afterApproval.body.schedule.find(item => item.id === proposed.body.schedule.id);
+    const pendingItem = afterApproval.body.schedule.find(item => item.id === secondProposal.body.schedule.id);
+    assert.equal(approvedItem.status, 'approved');
+    assert.equal(approvedItem.platform, 'youtube');
+    assert.equal(pendingItem.status, 'awaiting_approval', 'approval must not approve another platform schedule');
+    assert.equal(approvedItem.external_post_id, undefined);
   });
 });
