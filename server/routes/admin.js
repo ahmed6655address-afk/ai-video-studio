@@ -309,14 +309,18 @@ export function adminRouter(db) {
       params.push(String(taglineAr).trim().slice(0, 80));
     }
     if (req.body?.priceLyd !== undefined) {
-      const price = parseMoneyMinor(req.body.priceLyd, 'LYD');
-      if (price === null || price > 1000000000) return res.status(400).json({ error: 'INVALID_LYD_PRICE' });
+      const price = req.body.priceLyd === null || req.body.priceLyd === '' ? null : parseMoneyMinor(req.body.priceLyd, 'LYD');
+      if (price !== null && price > 1000000000 || price === null && req.body.priceLyd !== null && req.body.priceLyd !== '') {
+        return res.status(400).json({ error: 'INVALID_LYD_PRICE' });
+      }
       updates.push('price_lyd_minor = ?');
       params.push(price);
     }
     if (req.body?.priceUsd !== undefined) {
-      const price = parseMoneyMinor(req.body.priceUsd, 'USD');
-      if (price === null || price > 1000000000) return res.status(400).json({ error: 'INVALID_USD_PRICE' });
+      const price = req.body.priceUsd === null || req.body.priceUsd === '' ? null : parseMoneyMinor(req.body.priceUsd, 'USD');
+      if (price !== null && price > 1000000000 || price === null && req.body.priceUsd !== null && req.body.priceUsd !== '') {
+        return res.status(400).json({ error: 'INVALID_USD_PRICE' });
+      }
       updates.push('price_usd_minor = ?');
       params.push(price);
     }
