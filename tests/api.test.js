@@ -715,7 +715,7 @@ test('Telegram test notifications are restricted to the configured owner chat', 
       body: { chat_id: '999999999' },
     });
     assert.equal(regular.status, 403);
-    assert.equal(regular.body.error, 'OWNER_ONLY');
+    assert.equal(regular.body.error, 'FORBIDDEN');
     assert.equal(telegramRequest, null, 'a non-owner must never trigger Telegram delivery');
 
     const login = await api('/api/auth/login', {
