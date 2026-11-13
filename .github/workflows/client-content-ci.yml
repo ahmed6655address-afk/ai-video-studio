@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/client-content-publishing-60day
+      - feature/admin-notifications-telegram-whatsapp
   pull_request:
     branches:
       - appjet
