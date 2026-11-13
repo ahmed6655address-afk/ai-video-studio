@@ -8,6 +8,7 @@ import { adminRouter, publicPlansRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { projectsRouter } from './routes/projects.js';
 import { clientContentRouter } from './routes/client-content.js';
+import { configureTelegramWebhook, telegramWebhookHandler } from './telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -67,6 +68,10 @@ export function createApp(options = {}) {
   app.set('trust proxy', 1);
   app.use(securityHeaders);
   app.use(express.json({ limit: '1mb' }));
+
+  // Telegram is an isolated webhook outside /api so the app's browser CSRF guard
+  // does not apply. The handler authenticates Telegram's secret-token header.
+  app.post('/webhooks/telegram', telegramWebhookHandler());
 
   app.use((req, res, next) => {
     const cookies = parseCookies(req.headers.cookie);
@@ -144,6 +149,9 @@ if (isDirectRun) {
   const app = createApp();
   app.listen(port, '0.0.0.0', () => {
     console.log(`[AI VIDEO STUDIO] listening on http://0.0.0.0:${port}`);
+    // Optional and non-blocking: configures Telegram only when all required
+    // secrets and a public Render/base URL are present.
+    void configureTelegramWebhook().catch(() => console.warn('[telegram] webhook setup failed; check server configuration'));
     if (app.locals.owner?.password) {
       console.log('[owner] generated password (change it after first login):', app.locals.owner.password);
     }
