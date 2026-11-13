@@ -273,6 +273,40 @@ export function adminRouter(db) {
     res.json({ plan: serializePlan(db.prepare('SELECT * FROM plans WHERE code = ?').get(plan.code)) });
   });
 
+  // Manual activation is owner-only until a verified payment provider is integrated.
+  router.post('/client-content/subscriptions/:id', (req, res) => {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_REQUIRED' });
+    const target = db.prepare('SELECT id, role FROM users WHERE id = ?').get(Number(req.params.id));
+    if (!target) return res.status(404).json({ error: 'NOT_FOUND' });
+    if (target.role === 'owner') return res.status(400).json({ error: 'OWNER_UNLIMITED' });
+    const planCode = String(req.body?.planCode || '').trim().slice(0, 40);
+    const paymentRef = String(req.body?.paymentRef || '').trim().slice(0, 100);
+    const months = Number(req.body?.months || 1);
+    if (!planCode || !paymentRef || paymentRef.length < 3 || !Number.isInteger(months) || months < 1 || months > 12) {
+      return res.status(400).json({ error: 'VALIDATION_ERROR', messageAr: 'يلزم رمز باقة ومرجع دفع متحقق ومدة من شهر إلى 12 شهراً.' });
+    }
+    const now = new Date();
+    const expires = new Date(now.getTime() + months * 30 * 24 * 60 * 60 * 1000);
+    const tx = db.transaction(() => {
+      db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'").run(now.toISOString(), target.id);
+      const result = db.prepare(`INSERT INTO client_content_subscriptions(user_id,status,plan_code,starts_at,expires_at,payment_ref,activated_by,created_at,updated_at)
+        VALUES(?,'active',?,?,?,?,?,?,?)`).run(target.id, planCode, now.toISOString(), expires.toISOString(), paymentRef, req.user.id, now.toISOString(), now.toISOString());
+      return Number(result.lastInsertRowid);
+    });
+    const subscriptionId = tx();
+    res.status(201).json({ subscription: { id: subscriptionId, userId: target.id, status: 'active', planCode, startsAt: now.toISOString(), expiresAt: expires.toISOString() },
+      messageAr: 'تم تسجيل التفعيل الإداري. لم يتم تنفيذ تحصيل مالي آلي.' });
+  });
+
+  router.delete('/client-content/subscriptions/:id', (req, res) => {
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'OWNER_REQUIRED' });
+    const target = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(req.params.id));
+    if (!target) return res.status(404).json({ error: 'NOT_FOUND' });
+    db.prepare("UPDATE client_content_subscriptions SET status='canceled',updated_at=? WHERE user_id=? AND status='active'")
+      .run(new Date().toISOString(), target.id);
+    res.json({ messageAr: 'تم إلغاء اشتراك إدارة ونشر المحتوى.' });
+  });
+
   router.get('/providers', (req, res) => {
     res.json({ providers: providerStatus() });
   });
