@@ -546,13 +546,13 @@ test('owner identity comes from server env, never from a registrant password', a
 
 test('client content publishing workspace is isolated and subscription-gated', async (t) => {
   await t.test('authenticated users can view ideas but cannot create a workspace without the separate subscription', async () => {
-    const view = await api('/api/client-content', { cookie: state.userCookie });
+    const view = await api('/api/client-content', { cookie: state.user2Cookie });
     assert.equal(view.status, 200);
     assert.equal(view.body.serviceAccess, false);
     assert.ok(view.body.ideas.length >= 5);
     const create = await api('/api/client-content/projects', {
       method: 'POST',
-      cookie: state.userCookie,
+      cookie: state.user2Cookie,
       body: { title: 'سلسلة تجريبية', creationMode: 'custom', brief: 'قصة تجريبية طويلة للاختبار', language: 'ar' },
     });
     assert.equal(create.status, 402);
@@ -585,7 +585,7 @@ test('client content publishing workspace is isolated and subscription-gated', a
   await t.test('one customer cannot read another customer content project', async () => {
     const list = await api('/api/client-content', { cookie: state.ownerCookie });
     const projectId = list.body.projects[0].id;
-    const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.userCookie });
+    const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.user2Cookie });
     assert.equal(denied.status, 404);
   });
 
