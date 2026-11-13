@@ -626,6 +626,18 @@ test('client content publishing workspace is isolated and subscription-gated', a
     assert.equal(detail.body.contentPlanDays.length, 60);
     assert.equal(detail.body.contentPlanDays[0].day_number, 1);
     assert.equal(detail.body.contentPlanDays[59].day_number, 60);
+
+    const edited = await api('/api/client-content/projects/' + projectId + '/episodes/' + episode.body.episode.id, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { title: 'البداية الجديدة', script: 'مشهد افتتاحي يعرّف بالشخصيات ويهيئ أحداث السلسلة.', plannedDate: '2026-11-15' },
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.episode.status, 'script_draft');
+    const refreshed = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(refreshed.body.episodes[0].title, 'البداية الجديدة');
+    assert.equal(refreshed.body.episodes[0].planned_date, '2026-11-15');
+    assert.match(refreshed.body.episodes[0].script, /مشهد افتتاحي/);
   });
 
   await t.test('one customer cannot read another customer content project', async () => {
@@ -633,6 +645,11 @@ test('client content publishing workspace is isolated and subscription-gated', a
     const projectId = list.body.projects[0].id;
     const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.user2Cookie });
     assert.equal(denied.status, 404);
+    const episodeId = (await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie })).body.episodes[0].id;
+    const deniedEdit = await api('/api/client-content/projects/' + projectId + '/episodes/' + episodeId, {
+      method: 'PATCH', cookie: state.user2Cookie, body: { title: 'محاولة تعديل غير مصرح بها' },
+    });
+    assert.equal(deniedEdit.status, 404);
   });
 
   await t.test('approval records are stored without triggering external publishing', async () => {
