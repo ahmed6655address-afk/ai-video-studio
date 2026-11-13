@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/fal-wan-text-to-video
+      - feature/prepaid-generation-guard
   pull_request:
     branches:
       - appjet
@@ -23,6 +24,9 @@ jobs:
       - run: npm ci
       - name: Check changed server and test syntax
         run: |
+          node --check server/finance.js
+          node --check server/db.js
+          node --check server/routes/admin.js
           node --check server/providers.js
           node --check server/routes/projects.js
           node --check tests/api.test.js
