@@ -347,12 +347,474 @@ test('owner has free unlimited access and full admin rights', async (t) => {
   });
 });
 
+test('internal credits wallet requires manual payment review', async (t) => {
+  let requestId;
+  await t.test('only LYD and USD transfer requests are accepted and do not add credits immediately', async () => {
+    const invalid = await api('/api/wallet/payment-requests', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { currency: 'SAR', amount: 25, paymentReference: 'BANK-INVALID-01' },
+    });
+    assert.equal(invalid.status, 400);
+
+    const created = await api('/api/wallet/payment-requests', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: {
+        currency: 'LYD',
+        amount: '25.500',
+        paymentReference: 'BANK-TRF-1001',
+        note: 'تحويل مصرفي تجريبي',
+      },
+    });
+    assert.equal(created.status, 201);
+    requestId = created.body.paymentRequest.id;
+    assert.equal(created.body.paymentRequest.currency, 'LYD');
+    assert.equal(created.body.paymentRequest.amount, 25.5);
+
+    const wallet = await api('/api/wallet', { cookie: state.userCookie });
+    assert.equal(wallet.status, 200);
+    assert.equal(wallet.body.wallet.balance, 0);
+    assert.equal(wallet.body.paymentRequests[0].status, 'pending');
+  });
+
+  await t.test('payment references cannot be reused', async () => {
+    const duplicate = await api('/api/wallet/payment-requests', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { currency: 'USD', amount: 10, paymentReference: 'BANK-TRF-1001' },
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error, 'PAYMENT_REFERENCE_USED');
+  });
+
+  await t.test('only the owner can approve a pending transfer and credits are added once', async () => {
+    const denied = await api(`/api/admin/payments/${requestId}/approve`, {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { credits: 100, verificationNote: 'تحقق من الحوالة' },
+    });
+    assert.equal(denied.status, 403);
+
+    const list = await api('/api/admin/payments?status=pending', { cookie: state.ownerCookie });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.payments.some((item) => item.id === requestId), true);
+
+    const approved = await api(`/api/admin/payments/${requestId}/approve`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { credits: 100, verificationNote: 'تمت مطابقة الحوالة مع كشف الحساب' },
+    });
+    assert.equal(approved.status, 200);
+
+    const duplicateApproval = await api(`/api/admin/payments/${requestId}/approve`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { credits: 100, verificationNote: 'محاولة اعتماد ثانية' },
+    });
+    assert.equal(duplicateApproval.status, 409);
+
+    const wallet = await api('/api/wallet', { cookie: state.userCookie });
+    assert.equal(wallet.body.wallet.balance, 100);
+    assert.equal(wallet.body.paymentRequests[0].status, 'approved');
+  });
+});
+
 test('granting a subscription unlocks generation within plan limits', async (t) => {
-  await t.test('admin grants the starter plan', async () => {
+  await t.test('owner configures independent LYD/USD prices before manually verified activation', async () => {
+    const price = await api('/api/admin/plans/starter', {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { priceLyd: 79, priceUsd: 10 },
+    });
+    assert.equal(price.status, 200);
+    assert.deepEqual(price.body.plan.prices, { LYD: 79, USD: 10 });
+
+    const unverified = await api(`/api/admin/users/${state.userId}/subscription`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'starter', months: 1, paymentRef: 'TEST-0001', currency: 'LYD', amount: 79 },
+    });
+    assert.equal(unverified.status, 400);
+    assert.equal(unverified.body.error, 'MANUAL_PAYMENT_VERIFICATION_REQUIRED');
+
     const res = await api(`/api/admin/users/${state.userId}/subscription`, {
       method: 'POST',
       cookie: state.ownerCookie,
-      body: { planCode: 'starter', months: 1, paymentRef: 'TEST-0001' },
+      body: {
+        planCode: 'starter',
+        months: 1,
+        paymentRef: 'TEST-0001',
+        currency: 'LYD',
+        amount: 79,
+        paymentVerified: true,
+        verificationNote: 'تمت مطابقة الحوالة في كشف الحساب',
+      },
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.subscription.planCode, 'starter');
+    assert.equal(res.body.entitlements.hasAccess, true);
+  });
+
+  await t.test('subscribed user generates and the project is stored', async () => {
+    const res = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { tool: 'voice', prompt: 'تعليق صوتي عربي دافئ لفقرة تعريفية عن الشركة' },
+    });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.project.tool, 'voice');
+    assert.equal(res.body.project.status, 'pending_provider');
+    assert.equal(res.body.providerConnected, false);
+
+    const list = await api('/api/projects', { cookie: state.userCookie });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.total, 1);
+    assert.equal(list.body.projects[0].tool, 'voice');
+
+    const detail = await api(`/api/projects/${res.body.project.id}`, { cookie: state.userCookie });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.project.id, res.body.project.id);
+  });
+
+  await t.test('usage endpoint reflects the month', async () => {
+    const res = await api('/api/usage', { cookie: state.userCookie });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.usage.voice, 1);
+    assert.equal(res.body.entitlements.limits.voice, 20);
+  });
+
+  await t.test('admin can override per-tool limits and the quota is enforced', async () => {
+    const patch = await api(`/api/admin/users/${state.userId}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { customLimits: { text_video: 1, image_video: 1, voice: 1, cartoon: 1 } },
+    });
+    assert.equal(patch.status, 200);
+    assert.equal(patch.body.entitlements.limits.text_video, 1);
+
+    const first = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { tool: 'text_video', prompt: 'مقدمة برنامج وثائقي عن الصحراء العربية' },
+    });
+    assert.equal(first.status, 201);
+
+    const second = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { tool: 'text_video', prompt: 'مقدمة برنامج وثائقي عن البحر الأحمر' },
+    });
+    assert.equal(second.status, 429);
+    assert.equal(second.body.error, 'QUOTA_EXCEEDED');
+  });
+
+  await t.test('users cannot read another user\'s project', async () => {
+    const other = await api('/api/auth/register', {
+      method: 'POST',
+      body: { name: 'خالد', email: 'khaled@test.dev', password: 'Str0ngPass!23' },
+    });
+    assert.equal(other.status, 201);
+    state.user2Cookie = other.cookie;
+
+    const list = await api('/api/projects', { cookie: state.userCookie });
+    const projectId = list.body.projects[0].id;
+    const forbidden = await api(`/api/projects/${projectId}`, { cookie: state.user2Cookie });
+    assert.equal(forbidden.status, 403);
+  });
+
+  await t.test('suspending a user revokes their sessions and blocks login', async () => {
+    const suspend = await api(`/api/admin/users/${state.userId}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { status: 'suspended' },
+    });
+    assert.equal(suspend.status, 200);
+
+    const afterSuspend = await api('/api/dashboard', { cookie: state.userCookie });
+    assert.equal(afterSuspend.status, 401);
+
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'sara@test.dev', password: 'Str0ngPass!23' },
+    });
+    assert.equal(login.status, 403);
+    assert.equal(login.body.error, 'ACCOUNT_SUSPENDED');
+  });
+
+  await t.test('revoking the subscription blocks generation again', async () => {
+    await api(`/api/admin/users/${state.userId}`, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { status: 'active' },
+    });
+    const relogin = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'sara@test.dev', password: 'Str0ngPass!23' },
+    });
+    assert.equal(relogin.status, 200);
+    state.userCookie = relogin.cookie;
+
+    const revoke = await api(`/api/admin/users/${state.userId}/subscription`, {
+      method: 'DELETE',
+      cookie: state.ownerCookie,
+    });
+    assert.equal(revoke.status, 200);
+
+    const res = await api('/api/projects', {
+      method: 'POST',
+      cookie: state.userCookie,
+      body: { tool: 'cartoon', prompt: 'شخصية كرتونية عربية لطيفة ترتدي ثوبًا تقليديًا' },
+    });
+    assert.equal(res.status, 402);
+  });
+
+  await t.test('logout invalidates the session', async () => {
+    const res = await api('/api/auth/logout', { method: 'POST', cookie: state.ownerCookie });
+    assert.equal(res.status, 200);
+    const me = await api('/api/auth/me', { cookie: state.ownerCookie });
+    assert.equal(me.status, 401);
+  });
+});
+
+test('owner identity comes from server env, never from a registrant password', async (t) => {
+  await t.test('re-provisioning an already registered address resets its password and sessions', async () => {
+    const previousEmail = process.env.OWNER_EMAIL;
+    const previousPassword = process.env.OWNER_PASSWORD;
+    process.env.OWNER_EMAIL = 'Sara@Test.dev';
+    process.env.OWNER_PASSWORD = 'Rotated-Owner-Pass!2026';
+
+    // Boot a second instance over the same database: this simulates pointing
+    // OWNER_EMAIL at an address that a regular user registered earlier.
+    const app2 = createApp({ dbFile });
+    const server2 = app2.listen(0);
+    await new Promise((resolve) => server2.once('listening', resolve));
+    const base2 = `http://127.0.0.1:${server2.address().port}`;
+    const call2 = async (pathname, { method = 'GET', body } = {}) => {
+      const headers = {};
+      if (body !== undefined) headers['content-type'] = 'application/json';
+      if (method !== 'GET') headers['x-requested-with'] = 'ai-video-studio';
+      const res = await fetch(`${base2}${pathname}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json().catch(() => null) };
+    };
+
+    try {
+      // The password the registrant chose for themselves no longer opens the account.
+      const oldPassword = await call2('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'sara@test.dev', password: 'Str0ngPass!23' },
+      });
+      assert.equal(oldPassword.status, 401);
+      assert.equal(oldPassword.body.error, 'INVALID_CREDENTIALS');
+
+      // Only the env secret does, and it carries owner rights plus unlimited access.
+      const envPassword = await call2('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'sara@test.dev', password: 'Rotated-Owner-Pass!2026' },
+      });
+      assert.equal(envPassword.status, 200);
+      assert.equal(envPassword.body.user.role, 'owner');
+      assert.equal(envPassword.body.entitlements.unlimited, true);
+      assert.equal(envPassword.body.entitlements.hasAccess, true);
+
+      // Any session held before elevation is revoked.
+      const stale = await api('/api/dashboard', { cookie: state.userCookie });
+      assert.equal(stale.status, 401);
+
+      // The address still cannot be claimed through public registration.
+      const reclaim = await call2('/api/auth/register', {
+        method: 'POST',
+        body: { name: 'مزاحم', email: 'sara@test.dev', password: 'Str0ngPass!23' },
+      });
+      assert.equal(reclaim.status, 409);
+      assert.equal(reclaim.body.error, 'EMAIL_TAKEN');
+    } finally {
+      server2.close();
+      process.env.OWNER_EMAIL = previousEmail;
+      process.env.OWNER_PASSWORD = previousPassword;
+    }
+  });
+});
+
+
+test('client content publishing workspace is isolated and subscription-gated', async (t) => {
+  const ownerLogin = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+  });
+  assert.equal(ownerLogin.status, 200);
+  state.ownerCookie = ownerLogin.cookie;
+
+  await t.test('authenticated users can view ideas but cannot create a workspace without the separate subscription', async () => {
+    const view = await api('/api/client-content', { cookie: state.user2Cookie });
+    assert.equal(view.status, 200);
+    assert.equal(view.body.serviceAccess, false);
+    assert.ok(view.body.ideas.length >= 5);
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { title: 'سلسلة تجريبية', creationMode: 'custom', brief: 'قصة تجريبية طويلة للاختبار', language: 'ar' },
+    });
+    assert.equal(create.status, 402);
+    assert.equal(create.body.error, 'CLIENT_CONTENT_SUBSCRIPTION_REQUIRED');
+  });
+
+  await t.test('only the owner can activate a manually verified content subscription', async () => {
+    const me = await api('/api/auth/me', { cookie: state.user2Cookie });
+    const denied = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001' },
+    });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'FORBIDDEN');
+
+    const unverified = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-UNVERIFIED' },
+    });
+    assert.equal(unverified.status, 400);
+    assert.equal(unverified.body.error, 'VERIFICATION_REQUIRED');
+
+    const activated = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001', paymentVerified: true, verificationNote: 'تم التحقق من كشف الدفع يدوياً' },
+    });
+    assert.equal(activated.status, 201);
+    const access = await api('/api/client-content', { cookie: state.user2Cookie });
+    assert.equal(access.body.serviceAccess, true);
+  });
+
+  await t.test('client-upload music requires a rights declaration', async () => {
+    const invalid = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'مشروع موسيقى', creationMode: 'custom', brief: 'مشروع تجريبي للتحقق من حقوق الموسيقى', musicChoice: 'client_upload' },
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.error, 'MUSIC_RIGHTS_REQUIRED');
+  });
+
+  await t.test('owner can create a private project and its episode', async () => {
+    const create = await api('/api/client-content/projects', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { title: 'حكايات الصحراء', creationMode: 'custom', brief: 'سلسلة قصصية عن الصحراء وشخصياتها', language: 'ar', dialect: 'ليبية', musicChoice: 'none', voiceProfile: { gender: 'female', tone: 'documentary', speed: 'normal', voiceIdentity: 'الراوي الرئيسي' } },
+    });
+    assert.equal(create.status, 201);
+    assert.equal(create.body.project.title, 'حكايات الصحراء');
+    const projectId = create.body.project.id;
+    const episode = await api('/api/client-content/projects/' + projectId + '/episodes', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeNumber: 1, title: 'البداية' },
+    });
+    assert.equal(episode.status, 201);
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.episodes.length, 1);
+    assert.equal(detail.body.project.voiceProfile.voiceIdentity, 'الراوي الرئيسي');
+    assert.equal(detail.body.contentPlanDays.length, 60);
+    assert.equal(detail.body.contentPlanDays[0].day_number, 1);
+    assert.equal(detail.body.contentPlanDays[59].day_number, 60);
+
+    const edited = await api('/api/client-content/projects/' + projectId + '/episodes/' + episode.body.episode.id, {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { title: 'البداية الجديدة', script: 'مشهد افتتاحي يعرّف بالشخصيات ويهيئ أحداث السلسلة.', plannedDate: '2026-11-15' },
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.episode.status, 'script_draft');
+    const refreshed = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    assert.equal(refreshed.body.episodes[0].title, 'البداية الجديدة');
+    assert.equal(refreshed.body.episodes[0].planned_date, '2026-11-15');
+    assert.match(refreshed.body.episodes[0].script, /مشهد افتتاحي/);
+  });
+
+  await t.test('one customer cannot read another customer content project', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const denied = await api('/api/client-content/projects/' + projectId, { cookie: state.user2Cookie });
+    assert.equal(denied.status, 404);
+    const episodeId = (await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie })).body.episodes[0].id;
+    const deniedEdit = await api('/api/client-content/projects/' + projectId + '/episodes/' + episodeId, {
+      method: 'PATCH', cookie: state.user2Cookie, body: { title: 'محاولة تعديل غير مصرح بها' },
+    });
+    assert.equal(deniedEdit.status, 404);
+  });
+
+  await t.test('approval records are stored without triggering external publishing', async () => {
+    const list = await api('/api/client-content', { cookie: state.ownerCookie });
+    const projectId = list.body.projects[0].id;
+    const detail = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    const episodeId = detail.body.episodes[0].id;
+    const scheduledAt = new Date(Date.now() + 2 * 86400000).toISOString();
+    const proposed = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'youtube', scheduledAt },
+    });
+    assert.equal(proposed.status, 201);
+    assert.equal(proposed.body.schedule.status, 'awaiting_approval');
+    const secondProposal = await api('/api/client-content/projects/' + projectId + '/schedule', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, platform: 'instagram', scheduledAt: new Date(Date.now() + 3 * 86400000).toISOString() },
+    });
+    assert.equal(secondProposal.status, 201);
+
+    const approval = await api('/api/client-content/projects/' + projectId + '/approvals', {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { episodeId, approvalType: 'schedule', decision: 'approved', scope: { scheduleId: proposed.body.schedule.id, revision: 1 } },
+    });
+    assert.equal(approval.status, 201);
+    assert.match(approval.body.messageAr, /لا ينفذ/);
+    const afterApproval = await api('/api/client-content/projects/' + projectId, { cookie: state.ownerCookie });
+    const approvedItem = afterApproval.body.schedule.find(item => item.id === proposed.body.schedule.id);
+    const pendingItem = afterApproval.body.schedule.find(item => item.id === secondProposal.body.schedule.id);
+    assert.equal(approvedItem.status, 'approved');
+    assert.equal(approvedItem.platform, 'youtube');
+    assert.equal(pendingItem.status, 'awaiting_approval', 'approval must not approve another platform schedule');
+    assert.equal(approvedItem.external_post_id, undefined);
+  });
+});
+
+  await t.test('owner configures independent LYD/USD prices before manually verified activation', async () => {
+    const price = await api('/api/admin/plans/starter', {
+      method: 'PATCH',
+      cookie: state.ownerCookie,
+      body: { priceLyd: 79, priceUsd: 10 },
+    });
+    assert.equal(price.status, 200);
+    assert.deepEqual(price.body.plan.prices, { LYD: 79, USD: 10 });
+
+    const unverified = await api(`/api/admin/users/${state.userId}/subscription`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'starter', months: 1, paymentRef: 'TEST-0001', currency: 'LYD', amount: 79 },
+    });
+    assert.equal(unverified.status, 400);
+    assert.equal(unverified.body.error, 'MANUAL_PAYMENT_VERIFICATION_REQUIRED');
+
+    const res = await api(`/api/admin/users/${state.userId}/subscription`, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: {
+        planCode: 'starter',
+        months: 1,
+        paymentRef: 'TEST-0001',
+        currency: 'LYD',
+        amount: 79,
+        paymentVerified: true,
+        verificationNote: 'تمت مطابقة الحوالة في كشف الحساب',
+      },
     });
     assert.equal(res.status, 201);
     assert.equal(res.body.subscription.planCode, 'starter');
