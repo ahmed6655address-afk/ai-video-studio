@@ -576,10 +576,18 @@ test('client content publishing workspace is isolated and subscription-gated', a
     assert.equal(denied.status, 403);
     assert.equal(denied.body.error, 'FORBIDDEN');
 
+    const unverified = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
+      method: 'POST',
+      cookie: state.ownerCookie,
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-UNVERIFIED' },
+    });
+    assert.equal(unverified.status, 400);
+    assert.equal(unverified.body.error, 'VERIFICATION_REQUIRED');
+
     const activated = await api('/api/admin/client-content/subscriptions/' + me.body.user.id, {
       method: 'POST',
       cookie: state.ownerCookie,
-      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001' },
+      body: { planCode: 'manual-test', months: 1, paymentRef: 'TEST-PAYMENT-001', paymentVerified: true, verificationNote: 'تم التحقق من كشف الدفع يدوياً' },
     });
     assert.equal(activated.status, 201);
     const access = await api('/api/client-content', { cookie: state.user2Cookie });
