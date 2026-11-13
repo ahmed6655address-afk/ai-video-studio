@@ -5,6 +5,7 @@ import { LoaderScreen, ToastProvider } from './components/ui.jsx';
 import { SessionProvider, useSession } from './session.jsx';
 import Admin from './pages/Admin.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import ClientContent from './pages/ClientContent.jsx';
 import History from './pages/History.jsx';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
@@ -74,6 +75,14 @@ export default function App() {
             element={
               <Protected>
                 <ToolPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/app/client-content"
+            element={
+              <Protected>
+                <ClientContent />
               </Protected>
             }
           />
