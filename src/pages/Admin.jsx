@@ -139,7 +139,7 @@ export default function Admin() {
   }, [search, loadUsers]);
 
   const assignablePlans = useMemo(
-    () => plans.filter((plan) => plan.isActive !== false && plan.code !== 'free'),
+    () => plans.filter((plan) => plan.isActive !== false && plan.code !== 'free' && (plan.prices?.LYD != null || plan.prices?.USD != null)),
     [plans]
   );
 
@@ -221,6 +221,63 @@ export default function Admin() {
     } finally {
       setBusyUser(null);
     }
+  }
+
+  async function reviewPayment(payment, decision) {
+    const draft = paymentDrafts[payment.id] || {};
+    const note = String(draft.note || '').trim();
+    if (note.length < 8) {
+      toast.push('أدخل ملاحظة مراجعة لا تقل عن 8 أحرف.', 'error');
+      return;
+    }
+    try {
+      if (decision === 'approve') {
+        const credits = Number(draft.credits);
+        if (!Number.isSafeInteger(credits) || credits < 1) {
+          toast.push('أدخل عدد نقاط استخدام صحيحًا.', 'error');
+          return;
+        }
+        await admin.approvePayment(payment.id, { credits, verificationNote: note });
+        toast.push('تم اعتماد الحوالة وإضافة نقاط الاستخدام.', 'success');
+      } else {
+        await admin.rejectPayment(payment.id, { reviewNote: note });
+        toast.push('تم رفض طلب التحويل وحفظ السبب.', 'success');
+      }
+      await loadPayments();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    }
+  }
+
+  function updatePaymentDraft(id, field, value) {
+    setPaymentDrafts((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), [field]: value },
+    }));
+  }
+
+  function changeSubPlan(planCode) {
+    const plan = assignablePlans.find((item) => item.code === planCode);
+    const currency = plan?.prices?.[subForm.currency] != null
+      ? subForm.currency
+      : plan?.prices?.LYD != null ? 'LYD' : 'USD';
+    const monthly = plan?.prices?.[currency];
+    setSubForm((prev) => ({
+      ...prev,
+      planCode,
+      currency,
+      amount: monthly == null ? '' : String(Number(monthly) * Number(prev.months || 1)),
+    }));
+  }
+
+  function changeSubCurrency(currency) {
+    const plan = assignablePlans.find((item) => item.code === subForm.planCode);
+    const monthly = plan?.prices?.[currency];
+    setSubForm((prev) => ({
+      ...prev,
+      currency,
+      amount: monthly == null ? '' : String(Number(monthly) * Number(prev.months || 1)),
+    }));
   }
 
   function openLimits(target) {
@@ -619,6 +676,88 @@ export default function Admin() {
               الدفعة، مع حفظ مرجع الدفع للمراجعة.
             </span>
           </div>
+        </section>
+      )}
+
+      {tab === 'payments' && user?.role === 'owner' && (
+        <section className="card card-pad">
+          <div className="row-between" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+            <div>
+              <h2 className="section-title" style={{ margin: 0 }}>مراجعة التحويلات اليدوية</h2>
+              <p className="small muted" style={{ margin: '4px 0 0' }}>لا تعتمد أي طلب قبل مطابقة المرجع والمبلغ فعليًا مع كشف الحساب أو إيصال موثوق.</p>
+            </div>
+            <select className="input select" style={{ maxWidth: 190 }} value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
+              <option value="pending">قيد المراجعة</option>
+              <option value="approved">معتمدة</option>
+              <option value="rejected">مرفوضة</option>
+            </select>
+          </div>
+          {loadingPayments ? <div className="center"><Spinner /></div> : payments.length ? (
+            <div className="stack">
+              {payments.map((payment) => {
+                const draft = paymentDrafts[payment.id] || {};
+                return (
+                  <article key={payment.id} className="card card-pad" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+                    <div className="row-between" style={{ gap: 12, flexWrap: 'wrap' }}>
+                      <div>
+                        <strong>{payment.userName || 'مستخدم'}</strong>
+                        <p className="small muted" style={{ margin: '3px 0' }} dir="ltr">{payment.userEmail}</p>
+                      </div>
+                      <span className={`badge ${payment.status === 'approved' ? 'badge-success' : payment.status === 'rejected' ? 'badge-danger' : 'badge-warning'}`}>
+                        {payment.status === 'approved' ? 'معتمد' : payment.status === 'rejected' ? 'مرفوض' : 'قيد المراجعة'}
+                      </span>
+                    </div>
+                    <div className="meta-list" style={{ marginTop: 10 }}>
+                      <div><dt>المبلغ المحوّل</dt><dd>{formatNumber(payment.amount)} {payment.currency === 'LYD' ? 'د.ل' : 'USD'}</dd></div>
+                      <div><dt>مرجع الحوالة</dt><dd dir="ltr">{payment.paymentReference}</dd></div>
+                      <div><dt>تاريخ الطلب</dt><dd>{formatDate(payment.createdAt)}</dd></div>
+                      {payment.customerNote && <div><dt>ملاحظة المستخدم</dt><dd>{payment.customerNote}</dd></div>}
+                      {payment.adminNote && <div><dt>ملاحظة الإدارة</dt><dd>{payment.adminNote}</dd></div>}
+                    </div>
+                    {payment.status === 'pending' && (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="form-grid">
+                          <Field label="نقاط الاستخدام التي ستضاف" htmlFor={`credits-${payment.id}`} required>
+                            <input
+                              id={`credits-${payment.id}`}
+                              className="input"
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={draft.credits || ''}
+                              onChange={(event) => updatePaymentDraft(payment.id, 'credits', event.target.value)}
+                              required
+                            />
+                          </Field>
+                          <Field label="ملاحظة التحقق أو سبب الرفض" htmlFor={`payment-note-${payment.id}`} required>
+                            <input
+                              id={`payment-note-${payment.id}`}
+                              className="input"
+                              minLength="8"
+                              maxLength="500"
+                              value={draft.note || ''}
+                              onChange={(event) => updatePaymentDraft(payment.id, 'note', event.target.value)}
+                              required
+                            />
+                          </Field>
+                        </div>
+                        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => reviewPayment(payment, 'approve')}>
+                            <Icon name="check" size={14} /> اعتماد وإضافة الرصيد
+                          </button>
+                          <button type="button" className="btn btn-outline btn-sm" onClick={() => reviewPayment(payment, 'reject')}>
+                            <Icon name="x" size={14} /> رفض الطلب
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState icon="wallet" title="لا توجد طلبات في هذا التصنيف">ستظهر طلبات التحويل هنا بعد إرسالها من صفحة الملف الشخصي.</EmptyState>
+          )}
         </section>
       )}
 
