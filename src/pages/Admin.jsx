@@ -23,6 +23,7 @@ const TABS = [
   { id: 'overview', label: 'نظرة عامة', icon: 'grid' },
   { id: 'users', label: 'المستخدمون', icon: 'users' },
   { id: 'plans', label: 'الخطط', icon: 'credit' },
+  { id: 'payments', label: 'طلبات التحويل', icon: 'wallet' },
 ];
 
 const TOOL_LABELS = {
@@ -53,7 +54,7 @@ export default function Admin() {
   const [loadingPlans, setLoadingPlans] = useState(true);
 
   const [subTarget, setSubTarget] = useState(null);
-  const [subForm, setSubForm] = useState({ planCode: 'pro', months: 1, paymentRef: '' });
+  const [subForm, setSubForm] = useState({ planCode: 'pro', months: 1, paymentRef: '', currency: 'LYD', amount: '', paymentVerified: false, verificationNote: '' });
   const [subSaving, setSubSaving] = useState(false);
 
   const [limitsTarget, setLimitsTarget] = useState(null);
@@ -62,6 +63,11 @@ export default function Admin() {
 
   const [planDraft, setPlanDraft] = useState(null);
   const [planSaving, setPlanSaving] = useState(false);
+
+  const [payments, setPayments] = useState([]);
+  const [paymentStatus, setPaymentStatus] = useState('pending');
+  const [loadingPayments, setLoadingPayments] = useState(false);
+  const [paymentDrafts, setPaymentDrafts] = useState({});
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
@@ -97,7 +103,7 @@ export default function Admin() {
           ...prev,
           planCode: data.plans.some((plan) => plan.code === prev.planCode)
             ? prev.planCode
-            : data.plans.find((plan) => plan.priceSar > 0)?.code || data.plans[0].code,
+            : data.plans.find((plan) => plan.code !== 'free' && (plan.prices?.LYD != null || plan.prices?.USD != null))?.code || data.plans[0].code,
         }));
       }
     } catch (err) {
@@ -107,11 +113,25 @@ export default function Admin() {
     }
   }, [toast]);
 
+  const loadPayments = useCallback(async () => {
+    if (user?.role !== 'owner') return;
+    setLoadingPayments(true);
+    try {
+      const data = await admin.payments(paymentStatus);
+      setPayments(data.payments || []);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setLoadingPayments(false);
+    }
+  }, [paymentStatus, toast, user?.role]);
+
   useEffect(() => {
     loadOverview();
     loadUsers();
     loadPlans();
-  }, [loadOverview, loadUsers, loadPlans]);
+    if (user?.role === 'owner') loadPayments();
+  }, [loadOverview, loadUsers, loadPlans, loadPayments, user?.role]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadUsers(search.trim()), 320);
@@ -151,11 +171,18 @@ export default function Admin() {
   }
 
   function openSubscription(target) {
+    const plan = assignablePlans.find((item) => item.prices?.LYD != null) ||
+      assignablePlans.find((item) => item.prices?.USD != null) || assignablePlans[0];
+    const currency = plan?.prices?.LYD != null ? 'LYD' : 'USD';
     setSubTarget(target);
     setSubForm({
-      planCode: assignablePlans.find((plan) => plan.priceSar > 0)?.code || assignablePlans[0]?.code || '',
+      planCode: plan?.code || '',
       months: 1,
       paymentRef: '',
+      currency,
+      amount: plan?.prices?.[currency] == null ? '' : String(plan.prices[currency]),
+      paymentVerified: false,
+      verificationNote: '',
     });
   }
 
@@ -167,7 +194,11 @@ export default function Admin() {
       await admin.grantSubscription(subTarget.id, {
         planCode: subForm.planCode,
         months: Number(subForm.months),
-        paymentRef: subForm.paymentRef.trim() || undefined,
+        paymentRef: subForm.paymentRef.trim(),
+        currency: subForm.currency,
+        amount: subForm.amount,
+        paymentVerified: subForm.paymentVerified,
+        verificationNote: subForm.verificationNote.trim(),
       });
       toast.push('تم تفعيل الاشتراك بنجاح.', 'success');
       setSubTarget(null);
@@ -244,7 +275,8 @@ export default function Admin() {
       code: plan.code,
       nameAr: plan.nameAr,
       taglineAr: plan.taglineAr || '',
-      priceSar: String(plan.priceSar ?? 0),
+      priceLyd: plan.prices?.LYD == null ? '' : String(plan.prices.LYD),
+      priceUsd: plan.prices?.USD == null ? '' : String(plan.prices.USD),
       isActive: plan.isActive !== false,
       limits: { ...(plan.limits || {}) },
     });
@@ -263,7 +295,8 @@ export default function Admin() {
       await admin.updatePlan(planDraft.code, {
         nameAr: planDraft.nameAr.trim(),
         taglineAr: planDraft.taglineAr.trim(),
-        priceSar: Number(planDraft.priceSar) || 0,
+        priceLyd: planDraft.priceLyd === '' ? 0 : Number(planDraft.priceLyd),
+        priceUsd: planDraft.priceUsd === '' ? 0 : Number(planDraft.priceUsd),
         isActive: planDraft.isActive,
         limits,
       });
@@ -298,7 +331,7 @@ export default function Admin() {
       </header>
 
       <div className="tabs" role="tablist">
-        {TABS.map((item) => (
+        {TABS.filter((item) => item.id !== 'payments' || user?.role === 'owner').map((item) => (
           <button
             key={item.id}
             type="button"
