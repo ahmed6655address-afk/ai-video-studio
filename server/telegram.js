@@ -119,6 +119,13 @@ async function handleUpdate(update, fetchImpl = fetch, env = process.env) {
   // First-time pairing is explicitly opt-in and requires a secret placed in
   // Render by the owner. The chat ID is returned only to the claimant holding it.
   if (!config.ownerChatId) {
+    if (command.name === 'start' || command.name === 'help') {
+      await telegramRequest(config.token, 'sendMessage', {
+        chat_id: chat.id,
+        text: 'البوت يستقبل الاتصال، لكن ربط حساب المالك لم يكتمل بعد. أكمل إعداد TELEGRAM_PAIRING_SECRET في Render ثم أرسل /link متبوعاً برمز الربط الذي أنشأته.',
+      }, fetchImpl);
+      return;
+    }
     if (command.name === 'link' && config.pairingSecret && safeEqual(command.argument, config.pairingSecret)) {
       await telegramRequest(config.token, 'sendMessage', {
         chat_id: chat.id,
@@ -165,7 +172,7 @@ export function telegramWebhookHandler({ fetchImpl = fetch, env = process.env } 
 export async function configureTelegramWebhook(env = process.env, fetchImpl = fetch) {
   const config = readConfig(env);
   const baseUrl = String(env.PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL || '').trim();
-  if (!config.token || !config.webhookSecret || !baseUrl) {
+  if (!config.token || !config.webhookSecret || !/^[A-Za-z0-9_-]{1,256}$/.test(config.webhookSecret) || !baseUrl) {
     return { configured: false, reason: 'TELEGRAM_ENV_INCOMPLETE' };
   }
   const webhookUrl = new URL('/webhooks/telegram', baseUrl).toString();
