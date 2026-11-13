@@ -688,3 +688,82 @@ test('client content publishing workspace is isolated and subscription-gated', a
     assert.equal(approvedItem.external_post_id, undefined);
   });
 });
+
+
+test('Telegram test notifications are restricted to the configured owner chat', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  const previousChat = process.env.TELEGRAM_OWNER_CHAT_ID;
+  const originalFetch = globalThis.fetch;
+  process.env.TELEGRAM_BOT_TOKEN = '1234567890:TEST_ONLY_NOT_A_REAL_TOKEN';
+  process.env.TELEGRAM_OWNER_CHAT_ID = '8732599160';
+  let telegramRequest = null;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith('https://api.telegram.org/')) {
+      telegramRequest = { url: String(url), body: JSON.parse(init.body) };
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 777 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return originalFetch(url, init);
+  };
+
+  try {
+    const regular = await api('/api/admin/notifications/telegram/test', {
+      method: 'POST',
+      cookie: state.user2Cookie,
+      body: { chat_id: '999999999' },
+    });
+    assert.equal(regular.status, 403);
+    assert.equal(regular.body.error, 'FORBIDDEN');
+    assert.equal(telegramRequest, null, 'a non-owner must never trigger Telegram delivery');
+
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+    });
+    assert.equal(login.status, 200);
+    const sent = await api('/api/admin/notifications/telegram/test', {
+      method: 'POST',
+      cookie: login.cookie,
+      body: { chat_id: '999999999', text: 'ignored client input' },
+    });
+    assert.equal(sent.status, 200);
+    assert.equal(sent.body.ok, true);
+    assert.equal(sent.body.messageId, 777);
+    assert.equal(telegramRequest.body.chat_id, '8732599160');
+    assert.match(telegramRequest.url, /bot1234567890:TEST_ONLY_NOT_A_REAL_TOKEN\/sendMessage$/);
+    assert.equal(telegramRequest.body.text.includes('ignored client input'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+    if (previousChat === undefined) delete process.env.TELEGRAM_OWNER_CHAT_ID;
+    else process.env.TELEGRAM_OWNER_CHAT_ID = previousChat;
+  }
+});
+
+test('Telegram test endpoint fails closed when server secrets are absent', async () => {
+  const previousToken = process.env.TELEGRAM_BOT_TOKEN;
+  const previousChat = process.env.TELEGRAM_OWNER_CHAT_ID;
+  delete process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.TELEGRAM_OWNER_CHAT_ID;
+  try {
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'owner@aivideo.studio', password: 'Owner-Test-Passw0rd!' },
+    });
+    assert.equal(login.status, 200);
+    const response = await api('/api/admin/notifications/telegram/test', {
+      method: 'POST',
+      cookie: login.cookie,
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.error, 'TELEGRAM_NOT_CONFIGURED');
+  } finally {
+    if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = previousToken;
+    if (previousChat === undefined) delete process.env.TELEGRAM_OWNER_CHAT_ID;
+    else process.env.TELEGRAM_OWNER_CHAT_ID = previousChat;
+  }
+});

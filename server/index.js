@@ -8,6 +8,7 @@ import { adminRouter, publicPlansRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { projectsRouter } from './routes/projects.js';
 import { clientContentRouter } from './routes/client-content.js';
+import { notificationsRouter } from './routes/notifications.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -95,6 +96,7 @@ export function createApp(options = {}) {
   api.use(publicPlansRouter(db));
   api.use(projectsRouter(db));
   api.use(clientContentRouter(db));
+  api.use('/admin/notifications', requireStaff, notificationsRouter());
   api.use('/admin', requireStaff, adminRouter(db));
 
   api.use((req, res) => res.status(404).json({ error: 'NOT_FOUND' }));
